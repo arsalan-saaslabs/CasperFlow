@@ -1,0 +1,15 @@
+# Secrets
+.env
+.env.local
+*.pem
+
+# Swift / macOS build
+.build/
+.swiftpm/
+dist/
+*.xcodeproj/xcuserdata/
+DerivedData/
+.DS_Store
+
+# Logs / scratch
+*.log
