@@ -15,7 +15,7 @@ final class FloatingHUDController {
 
   func sync(phase: DictationSession.Phase, pending: String, committed: String, mode: String) {
     switch phase {
-    case .connecting, .listening, .finalizing:
+    case .connecting, .listening, .finalizing, .composing:
       show(pending: pending, committed: committed, mode: mode, phase: phase)
     case .idle, .error:
       hide()
@@ -100,17 +100,17 @@ struct FloatingHUDView: View {
         Text(committed)
           .font(.callout)
           .foregroundStyle(.primary)
-          .lineLimit(3)
+          .lineLimit(phase == .composing ? 8 : 3)
       }
       if !pending.isEmpty {
         Text(pending)
           .font(.callout)
           .italic()
           .foregroundStyle(.secondary)
-          .lineLimit(3)
+          .lineLimit(phase == .composing ? 8 : 3)
       }
       if committed.isEmpty && pending.isEmpty {
-        Text("Listening…")
+        Text(phase == .composing ? "ChatGPT is writing…" : "Listening…")
           .foregroundStyle(.secondary)
       }
     }
@@ -128,6 +128,7 @@ struct FloatingHUDView: View {
     case .connecting: return "Connecting"
     case .listening: return "Dictating"
     case .finalizing: return "Finishing"
+    case .composing: return "ChatGPT"
     default: return "CasperFlow"
     }
   }

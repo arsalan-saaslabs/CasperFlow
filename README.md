@@ -7,7 +7,7 @@ Powered by **PyAI Hear** (speech-to-text) with optional **OpenAI** tone rephrasi
 ```
 Mic → 16 kHz PCM16 → pre-roll → Hear stream
   → local lexicon + app-aware tone
-  → optional OpenAI rewrite
+  → optional OpenAI rewrite (dictate) or ChatGPT compose (Ask)
   → paste at caret (any app)
 ```
 
@@ -27,7 +27,9 @@ cp .env.example ../.env   # or export keys in your shell
 ./run.sh
 ```
 
-This builds `dist/CasperFlow.app` and launches it (required for Accessibility / global hotkey).
+This builds the app, installs `~/Applications/CasperFlow.app`, and launches that copy (required for Accessibility / global hotkey).
+
+Always use `./run.sh` or `./build-app.sh` — not `swift run`. Enable **only** the CasperFlow in **~/Applications** (bundle `com.casperflow.app`), not Cursor and not `dist/CasperFlow.app` on the Desktop. Rebuilds keep the same bundle id, so that Accessibility toggle should stay valid.
 
 ## App sections
 
@@ -35,7 +37,7 @@ This builds `dist/CasperFlow.app` and launches it (required for Accessibility / 
 |---------|---------|
 | **Dictation** | Status, hold-to-talk, live transcript |
 | **API Keys** | PyAI (required) + OpenAI (optional) |
-| **App tones** | Per-app Casual / Professional / Developer / General |
+| **App tones** | Per-app Do nothing / Casual / Professional / Developer / General, plus a global rephrase shortcut |
 | **Appearance** | System / Light / Dark |
 | **Permissions** | Accessibility + microphone |
 
@@ -43,10 +45,12 @@ This builds `dist/CasperFlow.app` and launches it (required for Accessibility / 
 
 | Input | Action |
 |-------|--------|
-| **Ctrl+Option** (hold) | Push-to-talk → paste into focused app |
+| **Ctrl+Option** (hold) | Push-to-talk → paste transcript into focused app |
+| **Option+Command** (hold) | Speak a writing request → ChatGPT reply pastes (needs OpenAI key) |
+| **Ctrl+Command** (tap, configurable) | Rephrase selected text in the focused app |
 | Space / on-screen button | PTT while CasperFlow is focused |
 
-Enable **CasperFlow.app** (`com.casperflow.app`) under System Settings → Privacy & Security → Accessibility — not Cursor.
+Enable **~/Applications/CasperFlow.app** (`com.casperflow.app`) under System Settings → Privacy & Security → Accessibility — not Cursor, not the Desktop `dist` copy.
 
 ## What is included
 

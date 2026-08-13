@@ -5,7 +5,8 @@ set -euo pipefail
 
 PKG="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$PKG/.." && pwd)"
-APP="$PKG/dist/CasperFlow.app"
+DIST_APP="$PKG/dist/CasperFlow.app"
+APP="${HOME}/Applications/CasperFlow.app"
 
 if [[ -f "$ROOT/.env" ]]; then
   KEY_LINE="$(grep -E '^PYAI_API_KEY=' "$ROOT/.env" | tail -n1 || true)"
@@ -20,11 +21,14 @@ if [[ -z "${PYAI_API_KEY:-}" ]]; then
 fi
 
 NEED_BUILD=0
-if [[ ! -d "$APP" ]]; then
+if [[ ! -d "$DIST_APP" ]] || [[ ! -d "$APP" ]]; then
   NEED_BUILD=1
 else
   BIN_SRC="$(cd "$PKG" && swift build -c release --show-bin-path 2>/dev/null)/CasperFlow"
-  if [[ ! -x "$BIN_SRC" ]] || [[ "$PKG/Sources/CasperFlow" -nt "$APP/Contents/MacOS/CasperFlow" ]]; then
+  INSTALLED_BIN="$APP/Contents/MacOS/CasperFlow"
+  if [[ ! -x "$BIN_SRC" ]] || [[ ! -x "$INSTALLED_BIN" ]]; then
+    NEED_BUILD=1
+  elif find "$PKG/Sources/CasperFlow" -name "*.swift" -newer "$INSTALLED_BIN" -print -quit | grep -q .; then
     NEED_BUILD=1
   fi
 fi
@@ -47,4 +51,4 @@ else
 fi
 
 echo "Launched $APP"
-echo "In Accessibility, enable CasperFlow (bundle com.casperflow.app) — not Cursor."
+echo "In Accessibility, enable CasperFlow from ~/Applications (bundle com.casperflow.app) — not Cursor, not the Desktop/dist copy."

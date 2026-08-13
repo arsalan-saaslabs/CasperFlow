@@ -26,16 +26,17 @@ struct TextPolish: Sendable {
     guard !trimmed.isEmpty else { return "" }
 
     var output: String
+    let rewrite = toneEnabled && tone.appliesRewrite
     switch stage {
     case .live:
       output = lexicon.correctStreaming(trimmed)
-      if toneEnabled {
+      if rewrite {
         output = Punctuator.format(output, stage: .live, tone: tone)
         output = LocalToneRewriter.apply(output, tone: tone)
       }
     case .committed:
       output = lexicon.correct(trimmed)
-      if toneEnabled {
+      if rewrite {
         if tone != .developer {
           output = LocalSpellCorrector.correct(output)
           output = lexicon.correct(output)
@@ -65,7 +66,7 @@ enum Punctuator {
     case .committed:
       output = capitalizeSentences(output)
       switch tone {
-      case .casual:
+      case .doNothing, .casual:
         return output
       case .professional, .general:
         return ensureTerminalPunctuation(output)
