@@ -4,6 +4,10 @@ Open-source macOS dictation: hold **Ctrl+Option**, speak, and polished text past
 
 Powered by **PyAI Hear** (speech-to-text) with optional **OpenAI** tone rephrasing. MIT licensed.
 
+![Casper Dictation screen](docs/screenshots/casper-ui-dictation.png)
+
+![Casper listening overlay in Gmail](docs/screenshots/casper-overlay-gmail.png)
+
 ```
 Mic → 16 kHz PCM16 → pre-roll → Hear stream
   → local lexicon + app-aware tone
