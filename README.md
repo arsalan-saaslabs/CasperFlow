@@ -4,7 +4,7 @@ Speak naturally and paste polished text into any macOS app.
 
 Casper is a free, open-source macOS voice productivity app. It streams speech to **PyAI Hear**, shows live transcription in a floating HUD, and inserts the result at the current text caret. Vocabulary correction and lightweight app-aware tone rules run locally. An optional **OpenAI** key adds spoken writing requests, selection rephrasing, fuller LLM tone rewrites, and note summaries with action items.
 
-[Download the latest release](https://github.com/arsalan-saaslabs/CasperFlow/releases) · [Build from source](#run-from-source-on-a-fresh-mac) · [Report an issue](https://github.com/arsalan-saaslabs/CasperFlow/issues)
+[Download the latest release](https://github.com/arsalan-saaslabs/CasperFlow/releases) · [Setup guide](SETUP.md) · [Build from source](#run-from-source-on-a-fresh-mac) · [Report an issue](https://github.com/arsalan-saaslabs/CasperFlow/issues)
 
 Current version: **0.2.4** · License: [MIT](LICENSE) · Platform: **macOS 14+**
 
@@ -242,6 +242,8 @@ End users do not need to clone the repository or run a script.
 
 ## Run from source on a fresh Mac
 
+For a standalone clean-install checklist and expanded troubleshooting, see [SETUP.md](SETUP.md).
+
 ### Prerequisites
 
 - macOS 14 Sonoma or later
@@ -286,20 +288,20 @@ cd CasperFlow
 `run.sh` will:
 
 1. build a release binary when the app is missing or Swift source files changed;
-2. create an ad-hoc-signed bundle at `dist/Casper.app`;
-3. replace the source-build installation at `~/Applications/Casper.app`;
+2. when it builds, create an ad-hoc-signed bundle at `dist/Casper.app`;
+3. when it builds, replace the source-build installation at `~/Applications/Casper.app`;
 4. stop an older `CasperFlow` process; and
 5. launch the installed app bundle.
 
 When a build is needed, the packaging script also removes the legacy `~/Applications/CasperFlow.app` path before installing `Casper.app`.
 
-Use `./run.sh` for interactive testing. `./build-app.sh` only builds and installs the bundle, so follow it with `open "$HOME/Applications/Casper.app"` when you need to force a reinstall. Do **not** use `swift run` for normal app testing: global shortcuts and Accessibility approval must attach to the stable `com.casperflow.app` bundle.
+Use `./run.sh` for interactive testing. `./build-app.sh` only builds and installs the bundle; follow it with `./run.sh` to stop any older process and launch the new installation. Do **not** use `swift run` for normal app testing: global shortcuts and Accessibility approval must attach to the stable `com.casperflow.app` bundle.
 
 If you changed `Package.swift`, a build script, `Resources/Info.plist`, icons, or other non-Swift resources, force a rebuild and reinstall:
 
 ```bash
 ./build-app.sh
-open "$HOME/Applications/Casper.app"
+./run.sh
 ```
 
 ## First-run setup
@@ -427,13 +429,14 @@ Keys saved in the app are stored in local `UserDefaults`, not Keychain. The opti
 
 ### A resource change is not visible
 
-`run.sh` automatically checks Swift source freshness. After changing `Package.swift`, build scripts, icons, `Info.plist`, or other resources, run `./build-app.sh` to force the bundle to be recreated and installed.
+`run.sh` automatically checks Swift source freshness. After changing `Package.swift`, build scripts, icons, `Info.plist`, or other resources, run `./build-app.sh` to recreate and install the bundle, then run `./run.sh` to stop any older process and launch the new build.
 
 ## Project structure
 
 ```text
 CasperFlow/
 ├── Package.swift                  # SwiftPM executable and macOS 14 target
+├── SETUP.md                       # Clean-machine setup and development guide
 ├── Sources/CasperFlow/
 │   ├── App/                       # Settings, hotkeys, paste, local stores
 │   ├── Audio/                     # Microphone/system capture and PCM processing
