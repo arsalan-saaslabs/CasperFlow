@@ -19,7 +19,7 @@ Current version: **0.2.4** · License: [MIT](LICENSE) · Platform: **macOS 14+**
 - [Install a release](#install-a-release)
 - [Run from source on a fresh Mac](#run-from-source-on-a-fresh-mac)
 - [First-run setup](#first-run-setup)
-- [Local data and privacy](#local-data-and-privacy)
+- [Security and privacy](#security-and-privacy)
 - [Troubleshooting](#troubleshooting)
 
 ## What Casper can do
@@ -322,7 +322,16 @@ The script first runs `build-app.sh`, which also replaces `~/Applications/Casper
 
 The local DMG is ad-hoc signed, not Developer ID signed or notarized. Distribution without the right-click **Open** step requires an Apple Developer identity and notarization outside the current scripts.
 
-## Local data and privacy
+## Security and privacy
+
+- **No shell integration:** Casper does not invoke a shell, launch terminal commands, or synthesize the Return key. It only inserts or pastes plain text into the currently focused UI element. Terminal apps are not currently blocked, so text can be pasted at a terminal prompt if one is focused; always verify the target before using a voice action.
+- **Local persistence:** History, notes, vocabulary, preferences, API keys, and diagnostics stay on the Mac. Casper does not provide cloud sync for this stored data.
+- **Defined network boundaries:** Voice audio is streamed to PyAI Hear for transcription. Text is sent to OpenAI only for configured OpenAI-backed features such as Ask ChatGPT, Rephrase, LLM tone rewriting, and note insights.
+- **No audio or screen recordings:** Microphone and system audio are processed in memory rather than saved as media files. ScreenCaptureKit video frames are discarded; only system audio is used.
+- **Clipboard restoration:** Casper prefers direct Accessibility insertion. If it must use copy/paste, it snapshots the existing clipboard and restores it after the operation.
+- **Credential-aware diagnostics:** API keys are kept in local app preferences and are not intentionally written to logs. Diagnostic output removes common API-key and bearer-token patterns before it is displayed, copied, or emailed.
+
+### Local storage map
 
 | Data | Storage or destination |
 |---|---|
@@ -334,7 +343,7 @@ The local DMG is ad-hoc signed, not Developer ID signed or notarized. Distributi
 | Voice audio | Streamed to PyAI Hear for transcription |
 | OpenAI-backed text | Sent to OpenAI only for the selected OpenAI feature |
 
-Keys are stored locally and excluded from Casper's logs, but they are not stored in Keychain. Diagnostic output strips common API-key and bearer-token patterns before display, copy, or email.
+Keys saved in the app are stored in local `UserDefaults`, not Keychain. The optional `.env` fallback also stays local and is ignored by Git.
 
 ## Troubleshooting
 
