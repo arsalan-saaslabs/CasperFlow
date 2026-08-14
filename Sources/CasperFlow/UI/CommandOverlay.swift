@@ -164,7 +164,7 @@ struct CommandOverlayView: View {
             .foregroundStyle(.secondary)
         }
       VStack(alignment: .leading, spacing: 1) {
-        Text("CasperFlow")
+        Text("Casper")
           .font(.headline)
         Text("\(session.activeAppName) · Esc to close")
           .font(.caption2)

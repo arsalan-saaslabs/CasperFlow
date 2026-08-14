@@ -207,7 +207,7 @@ struct FloatingHUDView: View {
   private var emptyLabel: String {
     switch model.phase {
     case .composing: return "ChatGPT is writing…"
-    case .connecting: return "Connecting…"
+    case .connecting: return "Listening…"
     case .listening, .finalizing, .idle, .error: return "Listening…"
     }
   }
@@ -215,11 +215,11 @@ struct FloatingHUDView: View {
   private var phaseLabel: String {
     if model.pastedInto != nil { return "Pasted" }
     switch model.phase {
-    case .connecting: return "Connecting"
+    case .connecting: return "Listening"
     case .listening: return "Listening"
     case .finalizing: return "Finishing"
     case .composing: return "Working"
-    case .idle, .error: return "CasperFlow"
+    case .idle, .error: return "Casper"
     }
   }
 }

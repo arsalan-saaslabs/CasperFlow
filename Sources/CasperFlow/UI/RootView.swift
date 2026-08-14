@@ -43,8 +43,8 @@ struct RootView: View {
   private var background: some View {
     LinearGradient(
       colors: [
-        Color(nsColor: .windowBackgroundColor),
-        WFTheme.accent.opacity(0.06),
+        WFTheme.cream.opacity(0.35),
+        WFTheme.accent.opacity(0.08),
       ],
       startPoint: .topLeading,
       endPoint: .bottomTrailing
@@ -63,17 +63,10 @@ struct RootView: View {
     }
     .listStyle(.sidebar)
     .safeAreaInset(edge: .top) {
-      VStack(alignment: .leading, spacing: 4) {
-        Text("CasperFlow")
-          .font(.system(size: 20, weight: .bold, design: .rounded))
-          .foregroundStyle(WFTheme.accent)
-        Text("Voice → focused app")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      }
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(.horizontal, 16)
-      .padding(.vertical, 14)
+      CasperLockup(compact: true)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
   }
 

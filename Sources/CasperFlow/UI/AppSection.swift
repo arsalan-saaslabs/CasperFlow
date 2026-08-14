@@ -46,9 +46,15 @@ enum AppSection: String, CaseIterable, Identifiable {
 }
 
 enum WFTheme {
-  static let accent = Color(red: 0.07, green: 0.55, blue: 0.52)
-  static let accentSoft = Color(red: 0.07, green: 0.55, blue: 0.52).opacity(0.14)
-  static let ink = Color(red: 0.12, green: 0.16, blue: 0.18)
-  static let mist = Color(red: 0.94, green: 0.96, blue: 0.96)
+  /// Voice bars / accent — Casper teal `#2DD4BF`.
+  static let accent = Color(red: 45 / 255, green: 212 / 255, blue: 191 / 255)
+  static let accentSoft = Color(red: 45 / 255, green: 212 / 255, blue: 191 / 255).opacity(0.16)
+  /// Ghost body on light / eyes on dark — `#11100E`.
+  static let ink = Color(red: 17 / 255, green: 16 / 255, blue: 14 / 255)
+  /// Ghost body on dark — `#F6F1E8`.
+  static let cream = Color(red: 246 / 255, green: 241 / 255, blue: 232 / 255)
+  static let mist = Color(red: 246 / 255, green: 241 / 255, blue: 232 / 255)
   static let panel = Color(nsColor: .controlBackgroundColor)
+  static let wordmarkFont = Font.system(size: 22, weight: .bold, design: .rounded)
+  static let endorsementFont = Font.system(size: 11, weight: .semibold, design: .rounded)
 }

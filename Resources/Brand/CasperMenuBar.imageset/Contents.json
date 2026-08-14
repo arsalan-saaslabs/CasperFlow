@@ -1,0 +1,9 @@
+{
+  "images": [
+    { "idiom": "mac", "scale": "1x", "filename": "casper-menubar.png" },
+    { "idiom": "mac", "scale": "2x", "filename": "casper-menubar@2x.png" },
+    { "idiom": "mac", "scale": "3x", "filename": "casper-menubar@3x.png" }
+  ],
+  "info": { "version": 1, "author": "casper" },
+  "properties": { "template-rendering-intent": "template" }
+}

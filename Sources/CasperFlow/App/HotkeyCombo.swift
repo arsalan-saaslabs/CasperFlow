@@ -123,8 +123,8 @@ struct HotkeyCombo: Codable, Equatable, Sendable {
     guard mods.contains(.option) == usesOption else { return false }
     guard mods.contains(.command) == usesCommand else { return false }
     guard mods.contains(.shift) == usesShift else { return false }
-    if let expected = keyCode {
-      return eventKeyCode == expected
+    if let requiredKey = self.keyCode {
+      return eventKeyCode == requiredKey
     }
     return eventKeyCode == nil
   }

@@ -125,9 +125,9 @@ final class GlobalRephraseHotKey {
     }
 
     guard event.type == .keyDown else { return false }
-    guard let expected = combo.keyCode else { return false }
+    guard combo.keyCode != nil else { return false }
     guard !event.isARepeat else { return false }
-    if combo.matches(flags: event.modifierFlags, keyCode: expected) {
+    if combo.matches(flags: event.modifierFlags, keyCode: event.keyCode) {
       onFire?()
       return true
     }

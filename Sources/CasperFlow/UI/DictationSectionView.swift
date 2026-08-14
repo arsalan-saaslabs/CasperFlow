@@ -11,11 +11,10 @@ struct DictationSectionView: View {
         if session.phase == .error {
           errorBanner
         }
-        statusRow
         controls
         levelMeter
         transcript
-        Text("Hold \(settings.dictateHotkey.displayName) to dictate into the focused app (microphone). Use Note taker to transcribe a video via system audio.")
+        Text("Hold \(settings.dictateHotkey.displayName) to dictate into the app that has the text caret. Use Note taker for videos and system audio.")
           .font(.caption)
           .foregroundStyle(.secondary)
       }
@@ -64,52 +63,6 @@ struct DictationSectionView: View {
       RoundedRectangle(cornerRadius: 12, style: .continuous)
         .stroke(Color.red.opacity(0.35), lineWidth: 1)
     )
-  }
-
-  private var statusRow: some View {
-    HStack(spacing: 12) {
-      statusChip(
-        title: session.activeAppName,
-        subtitle: settings.tonePolishEnabled
-          ? "\(session.activeProfileName) · \(session.activeTone.displayName)"
-          : "Tone polish off",
-        tint: WFTheme.accent
-      )
-      statusChip(
-        title: session.globalHotkeyActive ? "Global ON" : "Global OFF",
-        subtitle: settings.dictateHotkey.displayName,
-        tint: session.globalHotkeyActive ? .green : .orange
-      )
-      statusChip(
-        title: "Ask ChatGPT",
-        subtitle: settings.askHotkey.displayName,
-        tint: WFTheme.accent
-      )
-      statusChip(
-        title: "Rephrase",
-        subtitle: settings.rephraseHotkey.displayName,
-        tint: WFTheme.accent
-      )
-      Spacer()
-      Button("Refresh app") { session.refreshFrontmostApp() }
-        .buttonStyle(.bordered)
-    }
-  }
-
-  private func statusChip(title: String, subtitle: String, tint: Color) -> some View {
-    VStack(alignment: .leading, spacing: 2) {
-      Text(title)
-        .font(.subheadline.weight(.semibold))
-        .lineLimit(1)
-      Text(subtitle)
-        .font(.caption2)
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
-    }
-    .padding(.horizontal, 12)
-    .padding(.vertical, 10)
-    .background(tint.opacity(0.12))
-    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
   }
 
   private var controls: some View {

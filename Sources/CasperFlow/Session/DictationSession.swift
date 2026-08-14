@@ -50,6 +50,8 @@ final class DictationSession: ObservableObject {
   private var capture: AudioCaptureEngine?
   private var systemCapture: SystemAudioCapture?
   private var hear: HearClient?
+  /// True after Hear WebSocket opens. Audio is pre-rolled until then.
+  private var hearSocketReady = false
   private let preRoll = PreRollBuffer(capacitySamples: AudioConstants.preRollSampleCount)
   private var isHolding = false
   private var didFlushPreRoll = false
@@ -601,8 +603,9 @@ final class DictationSession: ObservableObject {
     pendingPartial = ""
     lastError = nil
     refreshFrontmostApp()
-    phase = .connecting
-    statusMessage = connectingStatus(for: kind)
+    hearSocketReady = false
+    phase = .listening
+    statusMessage = listeningStatus(for: kind)
     AppLog.info("beginHold kind=\(kind.rawValue) source=\(noteAudioSource.rawValue)")
     syncFloatingHUD()
 
@@ -687,14 +690,14 @@ final class DictationSession: ObservableObject {
     }
   }
 
-  private func connectingStatus(for kind: CaptureKind) -> String {
+  private func listeningStatus(for kind: CaptureKind) -> String {
     switch kind {
     case .ask:
-      return "Connecting… ChatGPT will write into \(activeAppName)"
+      return "Ask ChatGPT — speak your request, then release"
     case .notes:
-      return "Connecting note taker… \(noteAudioSource.title)"
+      return "Note taker listening — \(noteAudioSource.title)"
     case .dictate:
-      return "Connecting… will paste into \(activeAppName)"
+      return "Listening · \(activeTone.displayName) — release to commit"
     }
   }
 
@@ -829,20 +832,11 @@ final class DictationSession: ObservableObject {
 
   private func onHearConnected() {
     guard isHolding else { return }
+    hearSocketReady = true
     phase = .listening
-    statusMessage = {
-      switch captureKind {
-      case .ask:
-        return "Ask ChatGPT — speak your request, then release"
-      case .notes:
-        return "Note taker listening — \(noteAudioSource.title)"
-      case .dictate:
-        return "Listening @ 16 kHz · \(activeTone.displayName) — release to commit"
-      }
-    }()
+    statusMessage = listeningStatus(for: captureKind)
     syncFloatingHUD()
 
-    // Flush pre-roll collected during connect/warm-up.
     let primed = preRoll.flush()
     if !primed.isEmpty {
       didFlushPreRoll = true
@@ -854,7 +848,7 @@ final class DictationSession: ObservableObject {
     guard isHolding else { return }
     let prepared = PCMNormalizer.boost(samples)
 
-    if phase == .connecting || hear == nil {
+    if !hearSocketReady || hear == nil {
       preRoll.append(prepared)
       return
     }
@@ -1086,6 +1080,7 @@ final class DictationSession: ObservableObject {
   private func tearDownHear() {
     hear?.disconnect()
     hear = nil
+    hearSocketReady = false
     preRoll.reset()
   }
 

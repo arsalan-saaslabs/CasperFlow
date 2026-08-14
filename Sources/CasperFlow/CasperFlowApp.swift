@@ -14,7 +14,7 @@ struct CasperFlowApp: App {
   }
 
   var body: some Scene {
-    WindowGroup("CasperFlow", id: "main") {
+    WindowGroup("Casper", id: "main") {
       RootView(session: session)
     }
     .defaultSize(width: 860, height: 600)
@@ -24,15 +24,16 @@ struct CasperFlowApp: App {
     } label: {
       MenuBarLabel(session: session)
     }
+    .menuBarExtraStyle(.window)
   }
 
-  /// Two running copies each keep their own in-memory shortcut, so old ⌘E and new ⌘O both fire.
+  /// Keep this launch. Quit stale CasperFlow copies that still own the old shortcuts.
   private static func quitIfAnotherInstanceIsRunning() {
     let id = Bundle.main.bundleIdentifier ?? "com.casperflow.app"
     let others = NSRunningApplication.runningApplications(withBundleIdentifier: id)
       .filter { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
-    guard let other = others.first else { return }
-    other.activate()
-    exit(0)
+    for other in others {
+      other.forceTerminate()
+    }
   }
 }

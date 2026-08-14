@@ -34,6 +34,17 @@ rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR" "$RES_DIR"
 cp "$BIN" "$MACOS_DIR/CasperFlow"
 cp "$PKG/Resources/Info.plist" "$APP_DIR/Contents/Info.plist"
+if [[ -f "$PKG/Resources/AppIcon.icns" ]]; then
+  cp "$PKG/Resources/AppIcon.icns" "$RES_DIR/AppIcon.icns"
+fi
+if [[ -f "$PKG/Resources/Brand/casper-app-icon.png" ]]; then
+  cp "$PKG/Resources/Brand/casper-app-icon.png" "$RES_DIR/CasperAppIcon.png"
+fi
+for f in CasperMenuBar.png CasperMenuBar@2x.png CasperMenuBar@3x.png; do
+  if [[ -f "$PKG/Resources/$f" ]]; then
+    cp "$PKG/Resources/$f" "$RES_DIR/$f"
+  fi
+done
 sign_app "$APP_DIR"
 
 mkdir -p "${HOME}/Applications"

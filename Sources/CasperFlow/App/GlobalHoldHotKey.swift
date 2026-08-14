@@ -24,12 +24,14 @@ final class GlobalHoldHotKey {
   private var localKeyMonitor: Any?
   private var globalKeyMonitor: Any?
   private var pollTimer: Timer?
+  private var modifierPollTimer: Timer?
   private var isArmed = false
   private var isAskArmed = false
   private var armTask: Task<Void, Never>?
   private var lastCapable = false
   private(set) var isGlobalActive = false
   private static let trustPollInterval: TimeInterval = 1.0
+  private static let modifierPollInterval: TimeInterval = 0.05
 
   /// When the rephrase shortcut is a longer modifier chord (default ⌃⌥⌘),
   /// wait this long so Command can join before PTT starts.
@@ -51,15 +53,18 @@ final class GlobalHoldHotKey {
 
   func start() {
     stopMonitorsOnly()
-    _ = Self.requestTrust(prompt: true)
+    _ = Self.requestTrust(prompt: !Self.isProcessTrusted)
     installMonitors()
     startPollingTrust()
+    startModifierPoll()
     publishCapability()
   }
 
   func stop() {
     pollTimer?.invalidate()
     pollTimer = nil
+    modifierPollTimer?.invalidate()
+    modifierPollTimer = nil
     armTask?.cancel()
     armTask = nil
     stopMonitorsOnly()
@@ -186,6 +191,19 @@ final class GlobalHoldHotKey {
     onStatusChange?(lastCapable)
   }
 
+  /// Hardware modifier state — works while another app is focused (NSEvent flagsChanged often does not).
+  private func startModifierPoll() {
+    modifierPollTimer?.invalidate()
+    let timer = Timer(timeInterval: Self.modifierPollInterval, repeats: true) { [weak self] _ in
+      Task { @MainActor in
+        self?.handleFlags(NSEvent.modifierFlags)
+      }
+    }
+    timer.tolerance = 0.02
+    RunLoop.main.add(timer, forMode: .common)
+    modifierPollTimer = timer
+  }
+
   private func startPollingTrust() {
     pollTimer?.invalidate()
     // While Settings is open, trust can flip; update UI without tearing down monitors
@@ -229,7 +247,9 @@ final class GlobalHoldHotKey {
         edgeToggleDictate(matching: hold)
       } else if hold, !isArmed {
         if shouldConfirmBeforeArming() {
-          scheduleArm()
+          if armTask == nil {
+            scheduleArm()
+          }
         } else {
           isArmed = true
           onPress?()
@@ -303,7 +323,8 @@ final class GlobalHoldHotKey {
     var consumed = false
 
     if let expected = dictate.keyCode,
-       dictate.matches(flags: event.modifierFlags, keyCode: expected) {
+       dictate.matches(flags: event.modifierFlags, keyCode: event.keyCode),
+       expected == event.keyCode {
       if down {
         if isToggleMode() {
           if isArmed {
@@ -325,7 +346,8 @@ final class GlobalHoldHotKey {
     }
 
     if let expected = ask.keyCode,
-       ask.matches(flags: event.modifierFlags, keyCode: expected) {
+       ask.matches(flags: event.modifierFlags, keyCode: event.keyCode),
+       expected == event.keyCode {
       if down {
         if isToggleMode() {
           if isAskArmed {

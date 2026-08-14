@@ -36,7 +36,7 @@ No clone, no `./run.sh`.
 ./create-dmg.sh
 ```
 
-Output: `dist/CasperFlow-0.2.1.dmg`
+Output: `dist/CasperFlow-0.2.2.dmg`
 
 ## Run from source
 
