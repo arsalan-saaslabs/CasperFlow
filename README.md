@@ -61,6 +61,14 @@ You also need an internet connection that can reach `api.pyai.com`. OpenAI-backe
 
 The main Casper window also has a **Hold to talk** button. While that window is focused, Space can start the same action.
 
+![Completed dictation in Casper](docs/screenshots/casper-dictation-transcript.png)
+
+*The Dictation workspace shows the committed transcript alongside hold-to-talk, clear, level, and status controls.*
+
+![Floating Casper HUD over Firefox](docs/screenshots/casper-floating-hud-firefox.png)
+
+*The non-activating HUD streams live partial text and shows the active tone over the destination app without moving the text caret.*
+
 ### 2. Ask ChatGPT by voice
 
 1. Put the caret where the response should be inserted.
@@ -92,6 +100,10 @@ System-audio capture uses ScreenCaptureKit. Screen Recording permission is requi
 
 Casper retains the newest 80 notes on this Mac.
 
+![Casper Note taker with system audio selected](docs/screenshots/casper-note-taker.png)
+
+*The Note taker screen selects microphone, system audio, or both and provides space to browse completed notes for review and insights.*
+
 ### 5. Reuse History
 
 Dictate, Ask, and Rephrase results are stored locally. Open **History** in the app or press **Control + Shift + H** to use the movable overlay. You can:
@@ -103,6 +115,10 @@ Dictate, Ask, and Rephrase results are stored locally. Open **History** in the a
 - delete one item or clear all unsaved items.
 
 Casper retains the newest 80 unsaved entries; saved entries are not removed by that limit.
+
+![Casper History with task filters and recent entries](docs/screenshots/casper-history.png)
+
+*History groups Dictate, Ask ChatGPT, and Rephrase output with filters plus save, drag, paste, delete, and clear-unsaved controls.*
 
 ## How speech becomes text
 
@@ -129,11 +145,23 @@ When an OpenAI key is saved and automatic tone rephrasing is enabled, each eligi
 
 ## Features in detail
 
+### API keys
+
+PyAI is required for speech-to-text. OpenAI is optional for Dictate tone rewriting and required for Ask ChatGPT, explicit Rephrase, and note insights.
+
+![Casper API Keys settings](docs/screenshots/casper-api-keys.png)
+
+*The API Keys screen keeps values masked and lets users configure PyAI and OpenAI independently.*
+
 ### Vocabulary and text cleanup
 
 Vocabulary entries are case-insensitive **heard as → replacement** rules. Personal terms override Casper's built-in aliases and apply to both streaming HUD text and committed output. You can store up to 200 terms, with up to 80 characters on each side of a rule.
 
 Local processing also handles common jargon, filler removal for notes, spelling, capitalization, punctuation, and lightweight tone rules. The Developer tone deliberately skips general spell correction.
+
+![Casper Vocabulary editor](docs/screenshots/casper-vocabulary.png)
+
+*Vocabulary maps common Hear spellings to preferred names, acronyms, and jargon, with edit and delete controls for saved terms.*
 
 ### Per-app writing tones
 
@@ -150,6 +178,10 @@ Local processing also handles common jargon, filler removal for notes, spelling,
 
 Each profile can be changed to **Do nothing**, **Casual**, **Professional**, **Developer**, or **General**. Turning tone rephrasing off still keeps vocabulary cleanup. **Do nothing** applies vocabulary corrections but skips local spelling/punctuation formatting and both local and OpenAI tone rewriting.
 
+![Casper App tones settings](docs/screenshots/casper-app-tones.png)
+
+*App tones assign Casual, Professional, Developer, General, or Do nothing behavior to each supported application profile.*
+
 ### Shortcuts
 
 Every shortcut is configurable. Modifier-only chords and single keys are supported, duplicate assignments are rejected, and Escape cancels shortcut recording.
@@ -163,6 +195,18 @@ Every shortcut is configurable. Modifier-only chords and single keys are support
 | **Control + Shift + N** | Start or stop Note taker |
 | **Control + Shift + O** | Show or hide the command overlay |
 | Space or **Hold to talk** | Dictate while the Casper window is focused |
+
+![Casper Shortcuts settings](docs/screenshots/casper-shortcuts.png)
+
+*Shortcuts supports hold-to-talk or toggle behavior and lets every global action be changed or reset.*
+
+### Appearance
+
+Casper can follow macOS automatically or use Light or Dark mode.
+
+![Casper Appearance settings](docs/screenshots/casper-appearance.png)
+
+*Appearance offers System, Light, and Dark themes with an in-app preview.*
 
 ### Menu bar and overlays
 
@@ -271,6 +315,10 @@ open "$HOME/Applications/Casper.app"
 
 Do not grant Accessibility to Terminal, Cursor, the `dist/` copy, or a mounted DMG when you intend to run the installed Casper app.
 
+![Casper Permissions status](docs/screenshots/casper-permissions.png)
+
+*The Permissions screen reports Accessibility trust, opens the relevant System Settings pages, and explains when Microphone and Screen Recording access is needed.*
+
 ## Optional PyAI environment fallback
 
 The recommended configuration is the in-app **API Keys** screen. For local development, Casper can also read `PYAI_API_KEY` from a repository-root `.env` file:
@@ -344,6 +392,10 @@ The local DMG is ad-hoc signed, not Developer ID signed or notarized. Distributi
 | OpenAI-backed text | Sent to OpenAI only for the selected OpenAI feature |
 
 Keys saved in the app are stored in local `UserDefaults`, not Keychain. The optional `.env` fallback also stays local and is ignored by Git.
+
+![Casper Diagnostics screen](docs/screenshots/casper-diagnostics.png)
+
+*Diagnostics keeps operational errors on the Mac and provides sanitized copy, reveal, and email actions for troubleshooting.*
 
 ## Troubleshooting
 
