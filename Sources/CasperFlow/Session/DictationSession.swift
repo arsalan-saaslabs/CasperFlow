@@ -1,6 +1,7 @@
 import AVFoundation
 import AppKit
 import Combine
+import CoreGraphics
 import Foundation
 
 /// Push-to-talk dictation session:
@@ -19,6 +20,7 @@ final class DictationSession: ObservableObject {
   enum CaptureKind: String {
     case dictate
     case ask
+    case notes
   }
 
   @Published var phase: Phase = .idle
@@ -33,10 +35,20 @@ final class DictationSession: ObservableObject {
   @Published var activeProfileName: String = "Other apps"
   /// True only when Ctrl+Option works while another app is focused.
   @Published var globalHotkeyActive = false
-  /// Settings recorder is capturing a new rephrase shortcut.
-  @Published var isRecordingRephraseHotkey = false
+  /// Settings recorder is capturing a new shortcut.
+  @Published var recordingAction: HotkeyAction?
+  @Published var hotkeyRecordError: String?
+  /// Menu-bar enable/disable: pauses global hotkeys when false.
+  @Published var isEngineEnabled = true
+  /// Note Taker records into CasperFlow instead of pasting.
+  @Published var isNoteTaking = false
+  var isHoldingDictate: Bool { isHolding && captureKind == .dictate }
+  var isHoldingAsk: Bool { isHolding && captureKind == .ask }
+
+  private var noteAudioSource: NoteAudioSource { settings.noteAudioSource }
 
   private var capture: AudioCaptureEngine?
+  private var systemCapture: SystemAudioCapture?
   private var hear: HearClient?
   private let preRoll = PreRollBuffer(capacitySamples: AudioConstants.preRollSampleCount)
   private var isHolding = false
@@ -54,22 +66,38 @@ final class DictationSession: ObservableObject {
   private var captureKind: CaptureKind = .dictate
   /// Spoken instruction captured during an Ask ChatGPT hold (not prior dictation).
   private var askPromptLines: [String] = []
+  private var lastFailedKind: CaptureKind = .dictate
+  private var lastHudLevelSync = Date.distantPast
 
   private let apiKeyLock = NSLock()
   private var apiKey: String
   private let enableVoiceProcessing: Bool
   private let hotKey = GlobalHoldHotKey()
   private let rephraseHotKey: GlobalRephraseHotKey
+  private let historyHotKey: GlobalRephraseHotKey
+  private let notesHotKey: GlobalRephraseHotKey
+  private let paletteHotKey: GlobalRephraseHotKey
+  private let shortcutRecorder = ShortcutRecorder()
+  private var historyHotkeyCancellable: AnyCancellable?
+  private var notesHotkeyCancellable: AnyCancellable?
+  private var paletteHotkeyCancellable: AnyCancellable?
+  /// When true, dictate/ask was started from the overlay or menu — ignore hotkey release.
+  private var overlayCaptureActive = false
+  private var lastNoteMic: [Int16] = []
+  private var lastNoteSys: [Int16] = []
 
   init(
     apiKey: String,
     settings: AppSettingsStore,
-    enableVoiceProcessing: Bool = false
+    enableVoiceProcessing: Bool = true
   ) {
     self.apiKey = apiKey
     self.settings = settings
     self.enableVoiceProcessing = enableVoiceProcessing
     self.rephraseHotKey = GlobalRephraseHotKey(combo: settings.rephraseHotkey)
+    self.historyHotKey = GlobalRephraseHotKey(combo: settings.historyHotkey)
+    self.notesHotKey = GlobalRephraseHotKey(combo: settings.notesHotkey)
+    self.paletteHotKey = GlobalRephraseHotKey(combo: settings.paletteHotkey)
     refreshFrontmostApp()
     installHotKey()
     appSwitchCancellable = FrontmostAppTracker.shared.$targetBundleId
@@ -82,55 +110,281 @@ final class DictationSession: ObservableObject {
       .sink { [weak self] combo in
         self?.rephraseHotKey.updateCombo(combo)
       }
+    historyHotkeyCancellable = settings.$historyHotkey
+      .receive(on: RunLoop.main)
+      .sink { [weak self] combo in
+        self?.historyHotKey.updateCombo(combo)
+      }
+    notesHotkeyCancellable = settings.$notesHotkey
+      .receive(on: RunLoop.main)
+      .sink { [weak self] combo in
+        self?.notesHotKey.updateCombo(combo)
+      }
+    paletteHotkeyCancellable = settings.$paletteHotkey
+      .receive(on: RunLoop.main)
+      .sink { [weak self] combo in
+        self?.paletteHotKey.updateCombo(combo)
+      }
   }
 
   private func installHotKey() {
     hotKey.rephraseCombo = { [weak self] in
       self?.settings.rephraseHotkey ?? .defaultRephrase
     }
-    hotKey.onPress = { [weak self] in self?.beginHold(kind: .dictate) }
-    hotKey.onRelease = { [weak self] in self?.endHold() }
+    hotKey.dictateCombo = { [weak self] in
+      self?.settings.dictateHotkey ?? .pushToTalk
+    }
+    hotKey.askCombo = { [weak self] in
+      self?.settings.askHotkey ?? .askChat
+    }
+    hotKey.isToggleMode = { [weak self] in
+      self?.settings.pushToTalkStyle == .toggle
+    }
+    hotKey.onPress = { [weak self] in
+      guard let self, self.recordingAction == nil else { return }
+      self.overlayCaptureActive = false
+      self.beginHold(kind: .dictate)
+    }
+    hotKey.onRelease = { [weak self] in
+      guard let self, !self.overlayCaptureActive else { return }
+      self.endHold()
+    }
     hotKey.onAskPress = { [weak self] in
-      guard let self, !self.isRecordingRephraseHotkey else { return }
+      guard let self, self.recordingAction == nil else { return }
+      self.overlayCaptureActive = false
       self.beginHold(kind: .ask)
     }
-    hotKey.onAskRelease = { [weak self] in self?.endHold() }
+    hotKey.onAskRelease = { [weak self] in
+      guard let self, !self.overlayCaptureActive else { return }
+      self.endHold()
+    }
     hotKey.onStatusChange = { [weak self] active in
       self?.globalHotkeyActive = active
       if active {
-        self?.statusMessage = "Global hotkeys armed — Ctrl+Option dictate, Option+Command ask ChatGPT"
+        let dictate = self?.settings.dictateHotkey.displayName ?? "⌃ + ⌥"
+        let ask = self?.settings.askHotkey.displayName ?? "⌥ + ⌘"
+        self?.statusMessage = "Global hotkeys armed — hold \(dictate) to dictate, \(ask) to ask ChatGPT"
       } else {
         self?.statusMessage = "Enable ~/Applications/CasperFlow.app in Accessibility for global hotkeys + paste"
       }
     }
     rephraseHotKey.onFire = { [weak self] in
-      self?.rephraseFrontmostSelection()
+      guard let self, self.recordingAction == nil else { return }
+      self.rephraseFrontmostSelection()
     }
-    rephraseHotKey.onRecorded = { [weak self] combo in
-      guard let self else { return }
-      self.settings.rephraseHotkey = combo
-      self.setRecordingRephraseHotkey(false)
+    historyHotKey.onFire = { [weak self] in
+      guard let self, self.recordingAction == nil else { return }
+      self.toggleHistoryOverlay()
     }
-    hotKey.start()
-    rephraseHotKey.start()
+    notesHotKey.onFire = { [weak self] in
+      guard let self, self.recordingAction == nil else { return }
+      self.toggleNoteTaking()
+    }
+    paletteHotKey.onFire = { [weak self] in
+      guard let self, self.recordingAction == nil else { return }
+      self.toggleCommandOverlay()
+    }
+    shortcutRecorder.onCapture = { [weak self] combo in
+      self?.finishRecording(combo: combo)
+    }
+    shortcutRecorder.onCancel = { [weak self] in
+      self?.setRecordingHotkey(nil)
+      self?.statusMessage = "Shortcut change cancelled"
+    }
+    HistoryOverlayController.shared.onPaste = { [weak self] item in
+      self?.pasteHistoryItem(item)
+    }
+    isEngineEnabled = settings.engineEnabled
+    if isEngineEnabled {
+      hotKey.start()
+      rephraseHotKey.start()
+      historyHotKey.start()
+      notesHotKey.start()
+      paletteHotKey.start()
+    } else {
+      statusMessage = "CasperFlow is disabled — enable it from the menu bar"
+    }
     FloatingHUDController.shared.attach(session: self)
+    CommandOverlayController.shared.attach(session: self)
+  }
+
+  /// Pause or resume global hotkeys from the menu bar.
+  func setEngineEnabled(_ enabled: Bool) {
+    settings.engineEnabled = enabled
+    isEngineEnabled = enabled
+    if enabled {
+      hotKey.start()
+      rephraseHotKey.start()
+      historyHotKey.start()
+      notesHotKey.start()
+      paletteHotKey.start()
+      refreshHotKeyAccess()
+      statusMessage = "CasperFlow enabled — hotkeys armed"
+    } else {
+      if isHolding {
+        endHold()
+      }
+      HistoryOverlayController.shared.hide()
+      CommandOverlayController.shared.hide()
+      hotKey.stop()
+      rephraseHotKey.stop()
+      historyHotKey.stop()
+      notesHotKey.stop()
+      paletteHotKey.stop()
+      globalHotkeyActive = false
+      statusMessage = "CasperFlow disabled — hotkeys paused"
+      phase = .idle
+      syncFloatingHUD()
+    }
   }
 
   /// Re-check Accessibility and reinstall the global monitor (after enabling in Settings).
   func refreshHotKeyAccess() {
+    if recordingAction != nil { return }
     _ = GlobalHoldHotKey.requestTrust(prompt: true)
     hotKey.reinstall()
     rephraseHotKey.reinstall()
+    historyHotKey.reinstall()
+    notesHotKey.reinstall()
+    paletteHotKey.reinstall()
     globalHotkeyActive = hotKey.canInterceptOtherApps
   }
 
+  func toggleHistoryOverlay() {
+    guard isEngineEnabled else { return }
+    guard recordingAction == nil else { return }
+    CommandOverlayController.shared.hide()
+    HistoryOverlayController.shared.toggle()
+  }
+
+  func toggleCommandOverlay() {
+    guard isEngineEnabled else { return }
+    guard recordingAction == nil else { return }
+    CommandOverlayController.shared.toggle()
+  }
+
+  func setToneForCurrentApp(_ tone: WritingTone) {
+    refreshFrontmostApp()
+    let info = FrontmostAppDetector.current(settings: settings)
+    settings.setTone(tone, for: info.profile)
+    refreshFrontmostApp()
+    statusMessage = "Tone for \(info.profile.displayName): \(tone.displayName)"
+  }
+
+  func toggleOverlayDictate() {
+    if isHoldingDictate {
+      overlayCaptureActive = false
+      endHold()
+      return
+    }
+    overlayCaptureActive = true
+    beginHold(kind: .dictate)
+  }
+
+  func toggleOverlayAsk() {
+    if isHoldingAsk {
+      overlayCaptureActive = false
+      endHold()
+      return
+    }
+    overlayCaptureActive = true
+    beginHold(kind: .ask)
+  }
+
+  func dismissError() {
+    guard phase == .error else { return }
+    lastError = nil
+    phase = .idle
+    statusMessage = "Ready. Start again from the shortcut, overlay, or Restart."
+    syncFloatingHUD()
+  }
+
+  func restartAfterError() {
+    let kind = lastFailedKind
+    lastError = nil
+    phase = .idle
+    isHolding = false
+    isNoteTaking = false
+    overlayCaptureActive = false
+    capture?.stop()
+    capture = nil
+    systemCapture?.stop()
+    systemCapture = nil
+    tearDownHear()
+    switch kind {
+    case .notes:
+      startNoteTaking()
+    case .dictate:
+      overlayCaptureActive = true
+      beginHold(kind: .dictate)
+    case .ask:
+      overlayCaptureActive = true
+      beginHold(kind: .ask)
+    }
+  }
+
+  func pasteHistoryItem(_ item: HistoryItem) {
+    let pasted = FrontmostTextInserter.paste(item.text)
+    statusMessage = pasted
+      ? "Pasted history into \(activeAppName)"
+      : "Click a text field, then paste from history"
+    if pasted {
+      FloatingHUDController.shared.flashPasted(into: activeAppName)
+    }
+  }
+
+  func setRecordingHotkey(_ action: HotkeyAction?) {
+    recordingAction = action
+    hotkeyRecordError = nil
+    hotKey.isPaused = action != nil
+
+    if let action {
+      if isHolding { endHold() }
+      rephraseHotKey.stop()
+      historyHotKey.stop()
+      notesHotKey.stop()
+      paletteHotKey.stop()
+      shortcutRecorder.start()
+      statusMessage = "Press a shortcut for \(action.title), then release"
+    } else {
+      shortcutRecorder.stop()
+      if isEngineEnabled {
+        rephraseHotKey.start()
+        historyHotKey.start()
+        notesHotKey.start()
+        paletteHotKey.start()
+      }
+    }
+  }
+
+  func ingestRecordingEvent(_ event: NSEvent) {
+    guard recordingAction != nil else { return }
+    shortcutRecorder.ingest(event)
+  }
+
+  private func finishRecording(combo: HotkeyCombo) {
+    guard let action = recordingAction else { return }
+    if let error = settings.assign(combo, to: action) {
+      hotkeyRecordError = error
+      shortcutRecorder.stop()
+      shortcutRecorder.start()
+      return
+    }
+    hotkeyRecordError = nil
+    setRecordingHotkey(nil)
+    statusMessage = "\(action.title) shortcut set to \(combo.displayName)"
+  }
+
   func setRecordingRephraseHotkey(_ recording: Bool) {
-    isRecordingRephraseHotkey = recording
-    rephraseHotKey.isRecording = recording
+    setRecordingHotkey(recording ? .rephrase : nil)
   }
 
   /// Rephrase selected text in the focused app (ignores per-app "Do nothing").
   func rephraseFrontmostSelection() {
+    guard isEngineEnabled else {
+      statusMessage = "CasperFlow is disabled — enable it from the menu bar"
+      return
+    }
     guard !isHolding, !isRephrasingSelection, phase != .composing else { return }
     refreshFrontmostApp()
 
@@ -165,6 +419,9 @@ final class DictationSession: ObservableObject {
         return
       }
       let pasted = FrontmostTextInserter.paste(rewritten)
+      if pasted {
+        HistoryStore.shared.add(text: rewritten, kind: .rephrase, appName: appName)
+      }
       self.statusMessage = pasted
         ? "Rephrased in \(appName)"
         : "Rephrase ready — focus another app to paste"
@@ -177,6 +434,9 @@ final class DictationSession: ObservableObject {
     if captureKind == .ask {
       toneLabel = "Ask ChatGPT · \(activeAppName)"
       committed = askPromptLines.joined(separator: " ")
+    } else if captureKind == .notes {
+      toneLabel = "Note taker · \(noteAudioSource.title)"
+      committed = NoteStore.shared.activeNote?.body ?? fullTranscript
     } else {
       toneLabel = settings.tonePolishEnabled
         ? "\(activeProfileName) · \(activeTone.displayName)"
@@ -185,9 +445,10 @@ final class DictationSession: ObservableObject {
     }
     FloatingHUDController.shared.sync(
       phase: phase,
-      pending: pendingPartial,
-      committed: committed,
-      mode: toneLabel
+      pending: phase == .error ? (lastError ?? statusMessage) : pendingPartial,
+      committed: phase == .error ? "" : committed,
+      mode: toneLabel,
+      level: level
     )
   }
 
@@ -205,7 +466,9 @@ final class DictationSession: ObservableObject {
       text,
       stage: stage,
       tone: activeTone,
-      toneEnabled: toneEnabled && captureKind == .dictate
+      toneEnabled: toneEnabled && captureKind == .dictate,
+      userTerms: VocabularyStore.shared.terms,
+      stripFillers: captureKind == .notes
     )
   }
 
@@ -231,12 +494,20 @@ final class DictationSession: ObservableObject {
   }
 
   func beginHold(kind: CaptureKind = .dictate) {
+    guard recordingAction == nil else { return }
+    guard isEngineEnabled else {
+      statusMessage = "CasperFlow is disabled — enable it from the menu bar"
+      return
+    }
     guard !isHolding, phase != .composing else { return }
+    if kind != .notes, isNoteTaking { return }
     let key = currentApiKey
     guard !key.isEmpty else {
+      AppLog.error("PYAI API key missing")
       phase = .error
       lastError = "PYAI_API_KEY is missing."
       statusMessage = lastError ?? ""
+      syncFloatingHUD()
       return
     }
     if kind == .ask {
@@ -250,6 +521,10 @@ final class DictationSession: ObservableObject {
     }
 
     captureKind = kind
+    isNoteTaking = kind == .notes
+    if kind == .notes {
+      NoteStore.shared.beginSession(source: noteAudioSource)
+    }
     askPromptLines = []
     isHolding = true
     didFlushPreRoll = false
@@ -259,36 +534,66 @@ final class DictationSession: ObservableObject {
     lastError = nil
     refreshFrontmostApp()
     phase = .connecting
-    statusMessage = kind == .ask
-      ? "Connecting… ChatGPT will write into \(activeAppName)"
-      : "Connecting… will paste into \(activeAppName)"
+    statusMessage = connectingStatus(for: kind)
+    AppLog.info("beginHold kind=\(kind.rawValue) source=\(noteAudioSource.rawValue)")
     syncFloatingHUD()
 
     Task {
-      let granted = await requestMicPermission()
-      guard granted else {
-        self.fail("Microphone permission denied.")
-        return
+      if kind == .notes, noteAudioSource.usesSystemAudio, !noteAudioSource.usesMicrophone {
+        // Screen Recording is requested when the system-audio stream starts.
+      } else {
+        let granted = await requestMicPermission()
+        guard granted else {
+          self.fail("Microphone permission denied.")
+          return
+        }
       }
       do {
-        try self.startPipeline(apiKey: key)
+        try await self.startPipeline(apiKey: key)
       } catch {
-        self.fail(error.localizedDescription)
+        self.fail(self.friendlyAudioError(error))
       }
     }
+  }
+
+  func toggleNoteTaking() {
+    guard isEngineEnabled else {
+      statusMessage = "CasperFlow is disabled — enable it from the menu bar"
+      return
+    }
+    if isNoteTaking {
+      stopNoteTaking()
+    } else {
+      startNoteTaking()
+    }
+  }
+
+  func startNoteTaking() {
+    guard !isNoteTaking else { return }
+    beginHold(kind: .notes)
+  }
+
+  func stopNoteTaking() {
+    guard isNoteTaking else { return }
+    endHold()
   }
 
   func endHold() {
     guard isHolding else { return }
     isHolding = false
+    overlayCaptureActive = false
     let kind = captureKind
     phase = .finalizing
-    statusMessage = kind == .ask ? "Finishing your request…" : "Committing…"
+    statusMessage = kind == .ask
+      ? "Finishing your request…"
+      : kind == .notes ? "Saving note…" : "Committing…"
     syncFloatingHUD()
 
-    // Stop sending new mic audio; keep socket open briefly for speech_final.
+    // Stop sending new audio; keep socket open briefly for speech_final.
     capture?.stop()
     capture = nil
+    systemCapture?.stop()
+    systemCapture = nil
 
     hear?.commit()
 
@@ -302,6 +607,12 @@ final class DictationSession: ObservableObject {
       self.level = 0
       if kind == .ask {
         await self.composeAskAndPaste()
+      } else if kind == .notes {
+        NoteStore.shared.endSession()
+        self.isNoteTaking = false
+        self.phase = .idle
+        self.statusMessage = "Note saved. Start again to continue."
+        self.syncFloatingHUD()
       } else {
         self.phase = .idle
         self.statusMessage = self.didPasteInThisHold
@@ -312,8 +623,36 @@ final class DictationSession: ObservableObject {
     }
   }
 
-  private func startPipeline(apiKey: String) throws {
-    let client = HearClient(apiKey: apiKey)
+  private func connectingStatus(for kind: CaptureKind) -> String {
+    switch kind {
+    case .ask:
+      return "Connecting… ChatGPT will write into \(activeAppName)"
+    case .notes:
+      return "Connecting note taker… \(noteAudioSource.title)"
+    case .dictate:
+      return "Connecting… will paste into \(activeAppName)"
+    }
+  }
+
+  private func friendlyAudioError(_ error: Error) -> String {
+    AppLog.error("Note taker / audio start failed", error: error)
+    if let captureError = error as? SystemAudioCaptureError {
+      return captureError.localizedDescription
+    }
+    let ns = error as NSError
+    if ns.domain.lowercased().contains("screencapture")
+      || ns.localizedDescription.localizedCaseInsensitiveContains("screen")
+      || !CGPreflightScreenCaptureAccess() {
+      return "\(SystemAudioCaptureError.screenRecordingDenied.localizedDescription) (\(ns.domain) \(ns.code))"
+    }
+    return "Note taker failed: \(ns.localizedDescription) [\(ns.domain) \(ns.code)]"
+  }
+
+  private func startPipeline(apiKey: String) async throws {
+    let client = HearClient(
+      apiKey: apiKey,
+      config: captureKind == .notes ? .notes : HearConfig()
+    )
     hear = client
 
     client.onConnected = { [weak self] in
@@ -328,43 +667,115 @@ final class DictationSession: ObservableObject {
     }
     client.onDisconnected = { [weak self] in
       Task { @MainActor in
-        guard let self, self.isHolding else { return }
-        self.fail("Hear disconnected.")
+        guard let self else { return }
+        guard self.isHolding, self.phase == .listening || self.phase == .connecting else { return }
+        AppLog.error("Hear disconnected while holding")
+        self.fail("Hear disconnected. Check your network and try again.")
       }
     }
 
-    let engine = AudioCaptureEngine(enableVoiceProcessing: enableVoiceProcessing)
-    capture = engine
+    lastNoteMic = []
+    lastNoteSys = []
 
-    // Warm pre-roll while connecting so first word is not clipped.
-    engine.onPCM16 = { [weak self] samples in
-      Task { @MainActor in
-        self?.handlePCM(samples)
+    if captureKind == .notes, noteAudioSource.usesSystemAudio {
+      let sys = SystemAudioCapture()
+      systemCapture = sys
+      sys.onPCM16 = { [weak self] samples in
+        Task { @MainActor in
+          self?.ingestNoteSystem(samples)
+        }
       }
+      sys.onMetrics = { [weak self] metrics in
+        Task { @MainActor in
+          self?.applyAudioMetrics(metrics)
+        }
+      }
+      sys.onFatalError = { [weak self] error in
+        Task { @MainActor in
+          self?.fail(self?.friendlyAudioError(error) ?? error.localizedDescription)
+        }
+      }
+      try await sys.start()
     }
-    engine.onMetrics = { [weak self] metrics in
-      Task { @MainActor in
-        self?.level = metrics.rmsLevel
-        if metrics.didClip {
-          self?.didClipRecently = true
-          Task {
-            try? await Task.sleep(nanoseconds: 400_000_000)
-            await MainActor.run { self?.didClipRecently = false }
+
+    if captureKind != .notes || noteAudioSource.usesMicrophone {
+      let useVoiceProcessing = captureKind == .notes
+        ? noteAudioSource == .both
+        : enableVoiceProcessing
+      let engine = AudioCaptureEngine(enableVoiceProcessing: useVoiceProcessing)
+      capture = engine
+      engine.onPCM16 = { [weak self] samples in
+        Task { @MainActor in
+          guard let self else { return }
+          if self.captureKind == .notes {
+            self.ingestNoteMic(samples)
+          } else {
+            self.handlePCM(samples)
           }
         }
       }
+      engine.onMetrics = { [weak self] metrics in
+        Task { @MainActor in
+          self?.applyAudioMetrics(metrics)
+        }
+      }
+      try engine.start()
     }
-
-    try engine.start()
     client.connect()
+  }
+
+  private func ingestNoteMic(_ samples: [Int16]) {
+    lastNoteMic = samples
+    emitNotePCM()
+  }
+
+  private func ingestNoteSystem(_ samples: [Int16]) {
+    lastNoteSys = samples
+    emitNotePCM()
+  }
+
+  private func emitNotePCM() {
+    switch noteAudioSource {
+    case .microphone:
+      handlePCM(lastNoteMic)
+    case .system:
+      handlePCM(lastNoteSys)
+    case .both:
+      handlePCM(PCMNormalizer.mix(lastNoteMic, lastNoteSys))
+    }
+  }
+
+  private func applyAudioMetrics(_ metrics: AudioCaptureEngine.Metrics) {
+    level = metrics.rmsLevel
+    if phase == .listening || phase == .connecting {
+      let now = Date()
+      if now.timeIntervalSince(lastHudLevelSync) > 0.08 {
+        lastHudLevelSync = now
+        syncFloatingHUD()
+      }
+    }
+    if metrics.didClip {
+      didClipRecently = true
+      Task {
+        try? await Task.sleep(nanoseconds: 400_000_000)
+        await MainActor.run { self.didClipRecently = false }
+      }
+    }
   }
 
   private func onHearConnected() {
     guard isHolding else { return }
     phase = .listening
-    statusMessage = captureKind == .ask
-      ? "Ask ChatGPT — speak your request, then release"
-      : "Listening @ 16 kHz · \(activeTone.displayName) — release to commit"
+    statusMessage = {
+      switch captureKind {
+      case .ask:
+        return "Ask ChatGPT — speak your request, then release"
+      case .notes:
+        return "Note taker listening — \(noteAudioSource.title)"
+      case .dictate:
+        return "Listening @ 16 kHz · \(activeTone.displayName) — release to commit"
+      }
+    }()
     syncFloatingHUD()
 
     // Flush pre-roll collected during connect/warm-up.
@@ -377,9 +788,10 @@ final class DictationSession: ObservableObject {
 
   private func handlePCM(_ samples: [Int16]) {
     guard isHolding else { return }
+    let prepared = PCMNormalizer.boost(samples)
 
     if phase == .connecting || hear == nil {
-      preRoll.append(samples)
+      preRoll.append(prepared)
       return
     }
 
@@ -391,7 +803,7 @@ final class DictationSession: ObservableObject {
           sendPCM(primed)
         }
       }
-      sendPCM(samples)
+      sendPCM(prepared)
     }
   }
 
@@ -424,6 +836,13 @@ final class DictationSession: ObservableObject {
       pendingPartial = ""
       syncFloatingHUD()
     case .error(let message):
+      if Self.isBenignSocketError(message) {
+        AppLog.info("Ignored Hear socket error: \(message)")
+        if phase == .listening || phase == .connecting {
+          fail("Hear connection dropped. Tap Restart — you do not need to quit the app.")
+        }
+        return
+      }
       fail(message)
     case .other:
       break
@@ -455,6 +874,11 @@ final class DictationSession: ObservableObject {
     if captureKind == .ask {
       return
     }
+    if captureKind == .notes {
+      NoteStore.shared.append(trimmed)
+      statusMessage = "Note taker listening — \(noteAudioSource.title)"
+      return
+    }
 
     let tone = activeTone
     let appName = activeAppName
@@ -483,7 +907,7 @@ final class DictationSession: ObservableObject {
           self.statusMessage = "OpenAI unavailable — using local \(tone.displayName) tone"
         }
       }
-      self.pasteIntoFocusedApp(output)
+      self.pasteIntoFocusedApp(output, kind: .dictate)
     }
   }
 
@@ -525,7 +949,7 @@ final class DictationSession: ObservableObject {
 
     committedLines.append(answer)
     didPasteInThisHold = false
-    pasteIntoFocusedApp(answer)
+    pasteIntoFocusedApp(answer, kind: .ask)
     phase = .idle
     if didPasteInThisHold {
       statusMessage = "Pasted ChatGPT reply into \(appName)"
@@ -534,7 +958,7 @@ final class DictationSession: ObservableObject {
   }
 
   /// Paste into the app that currently has the text caret (not CasperFlow).
-  private func pasteIntoFocusedApp(_ text: String) {
+  private func pasteIntoFocusedApp(_ text: String, kind: HistoryTaskKind) {
     refreshFrontmostApp()
     var chunk = text
     if didPasteInThisHold {
@@ -544,6 +968,8 @@ final class DictationSession: ObservableObject {
     if pasted {
       didPasteInThisHold = true
       statusMessage = "Pasted into \(activeAppName)"
+      FloatingHUDController.shared.flashPasted(into: activeAppName)
+      HistoryStore.shared.add(text: text, kind: kind, appName: activeAppName)
     } else if !GlobalHoldHotKey.isProcessTrusted {
       statusMessage = "Paste failed — enable ~/Applications/CasperFlow.app in Accessibility"
     } else {
@@ -551,13 +977,31 @@ final class DictationSession: ObservableObject {
     }
   }
 
+  private static func isBenignSocketError(_ message: String) -> Bool {
+    let lower = message.lowercased()
+    return lower.contains("socket is not connected")
+      || lower.contains("socketnotconnected")
+      || lower.contains("not connected")
+      || lower.contains("enotconn")
+      || (lower.contains("socket") && lower.contains("connect"))
+  }
+
   private func fail(_ message: String) {
+    AppLog.error(message)
     lastError = message
     statusMessage = message
     phase = .error
+    lastFailedKind = captureKind
     isHolding = false
+    overlayCaptureActive = false
+    if captureKind == .notes {
+      NoteStore.shared.cancelIfEmpty()
+      isNoteTaking = false
+    }
     capture?.stop()
     capture = nil
+    systemCapture?.stop()
+    systemCapture = nil
     tearDownHear()
     level = 0
     syncFloatingHUD()

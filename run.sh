@@ -4,21 +4,26 @@
 set -euo pipefail
 
 PKG="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$PKG/.." && pwd)"
 DIST_APP="$PKG/dist/CasperFlow.app"
 APP="${HOME}/Applications/CasperFlow.app"
 
-if [[ -f "$ROOT/.env" ]]; then
-  KEY_LINE="$(grep -E '^PYAI_API_KEY=' "$ROOT/.env" | tail -n1 || true)"
-  if [[ -n "$KEY_LINE" ]]; then
-    export PYAI_API_KEY="${KEY_LINE#PYAI_API_KEY=}"
+# Optional .env next to this script (never required — keys can be set in the app).
+load_optional_env() {
+  local file="$1"
+  [[ -f "$file" ]] || return 0
+  local line
+  line="$(grep -E '^PYAI_API_KEY=' "$file" | tail -n1 || true)"
+  if [[ -n "$line" && -z "${PYAI_API_KEY:-}" ]]; then
+    export PYAI_API_KEY="${line#PYAI_API_KEY=}"
+    PYAI_API_KEY="${PYAI_API_KEY%\"}"
+    PYAI_API_KEY="${PYAI_API_KEY#\"}"
+    PYAI_API_KEY="${PYAI_API_KEY%\'}"
+    PYAI_API_KEY="${PYAI_API_KEY#\'}"
+    export PYAI_API_KEY
   fi
-fi
+}
 
-if [[ -z "${PYAI_API_KEY:-}" ]]; then
-  echo "PYAI_API_KEY is not set. Add it to $ROOT/.env or export it." >&2
-  exit 1
-fi
+load_optional_env "$PKG/.env"
 
 NEED_BUILD=0
 if [[ ! -d "$DIST_APP" ]] || [[ ! -d "$APP" ]]; then
@@ -41,14 +46,15 @@ fi
 pkill -x CasperFlow 2>/dev/null || true
 sleep 0.3
 
-# `open` registers the .app with TCC. App also reads ../.env via ApiKeyStore.
-# Pass key for this launch when supported (macOS 13+).
-if open --help 2>&1 | grep -q -- '--env'; then
+# Prefer launching ~/Applications so Accessibility stays on the same bundle.
+if [[ -n "${PYAI_API_KEY:-}" ]] && open --help 2>&1 | grep -q -- '--env'; then
   open "$APP" --env "PYAI_API_KEY=$PYAI_API_KEY"
 else
-  # Fallback: key still loaded from repo .env inside the app.
   open "$APP"
 fi
 
 echo "Launched $APP"
+if [[ -z "${PYAI_API_KEY:-}" ]]; then
+  echo "No PYAI_API_KEY in the environment — set it in CasperFlow → API Keys if you have not already."
+fi
 echo "In Accessibility, enable CasperFlow from ~/Applications (bundle com.casperflow.app) — not Cursor, not the Desktop/dist copy."

@@ -13,9 +13,16 @@ final class GlobalHoldHotKey {
   var onAskRelease: (() -> Void)?
   /// Fired when trust / monitor status changes.
   var onStatusChange: ((Bool) -> Void)?
+  /// Ignore chords while the Shortcuts recorder is capturing a new combo.
+  var isPaused = false
+  var isToggleMode: () -> Bool = { false }
+  private var dictateChordHeld = false
+  private var askChordHeld = false
 
   private var localMonitor: Any?
   private var globalMonitor: Any?
+  private var localKeyMonitor: Any?
+  private var globalKeyMonitor: Any?
   private var pollTimer: Timer?
   private var isArmed = false
   private var isAskArmed = false
@@ -30,6 +37,8 @@ final class GlobalHoldHotKey {
 
   /// Return the current rephrase shortcut so PTT can yield to a longer chord.
   var rephraseCombo: () -> HotkeyCombo = { .defaultRephrase }
+  var dictateCombo: () -> HotkeyCombo = { .pushToTalk }
+  var askCombo: () -> HotkeyCombo = { .askChat }
 
   static var isProcessTrusted: Bool {
     AXIsProcessTrusted()
@@ -56,6 +65,8 @@ final class GlobalHoldHotKey {
     stopMonitorsOnly()
     isArmed = false
     isAskArmed = false
+    dictateChordHeld = false
+    askChordHeld = false
     isGlobalActive = false
   }
 
@@ -121,23 +132,33 @@ final class GlobalHoldHotKey {
   }
 
   private func installMonitors() {
-    let handler: (NSEvent) -> Void = { [weak self] event in
+    let flagsHandler: (NSEvent) -> Void = { [weak self] event in
       self?.handleFlags(event.modifierFlags)
+    }
+    let keyHandler: (NSEvent) -> Bool = { [weak self] event in
+      self?.handleKey(event) ?? false
     }
 
     localMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { event in
-      handler(event)
+      flagsHandler(event)
       return event
     }
 
-    // Returns nil when this process is not allowed to monitor other apps.
-    if let monitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged, handler: handler) {
+    localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
+      keyHandler(event) ? nil : event
+    }
+
+    if let monitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged, handler: flagsHandler) {
       globalMonitor = monitor
-      isGlobalActive = true
     } else {
       globalMonitor = nil
-      isGlobalActive = false
     }
+
+    globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
+      _ = keyHandler(event)
+    }
+
+    isGlobalActive = globalMonitor != nil || globalKeyMonitor != nil
   }
 
   private func stopMonitorsOnly() {
@@ -148,6 +169,14 @@ final class GlobalHoldHotKey {
     if let globalMonitor {
       NSEvent.removeMonitor(globalMonitor)
       self.globalMonitor = nil
+    }
+    if let localKeyMonitor {
+      NSEvent.removeMonitor(localKeyMonitor)
+      self.localKeyMonitor = nil
+    }
+    if let globalKeyMonitor {
+      NSEvent.removeMonitor(globalKeyMonitor)
+      self.globalKeyMonitor = nil
     }
     isGlobalActive = false
   }
@@ -178,42 +207,158 @@ final class GlobalHoldHotKey {
   }
 
   private func handleFlags(_ flags: NSEvent.ModifierFlags) {
-    let hold = Self.isPushToTalk(flags)
-    let ask = HotkeyCombo.askChat.matches(flags: flags, keyCode: nil)
-
-    if hold, !isArmed {
-      if shouldConfirmBeforeArming() {
-        scheduleArm()
-      } else {
-        isArmed = true
-        onPress?()
-      }
-    } else if !hold {
-      armTask?.cancel()
-      armTask = nil
+    if isPaused {
       if isArmed {
         isArmed = false
         onRelease?()
       }
+      if isAskArmed {
+        isAskArmed = false
+        onAskRelease?()
+      }
+      armTask?.cancel()
+      armTask = nil
+      return
+    }
+    let dictate = dictateCombo()
+    let askComboValue = askCombo()
+
+    if dictate.keyCode == nil {
+      let hold = dictate.matches(flags: flags, keyCode: nil)
+      if isToggleMode() {
+        edgeToggleDictate(matching: hold)
+      } else if hold, !isArmed {
+        if shouldConfirmBeforeArming() {
+          scheduleArm()
+        } else {
+          isArmed = true
+          onPress?()
+        }
+      } else if !hold {
+        armTask?.cancel()
+        armTask = nil
+        if isArmed {
+          isArmed = false
+          onRelease?()
+        }
+      }
     }
 
-    if ask, !isAskArmed {
-      isAskArmed = true
-      onAskPress?()
-    } else if !ask, isAskArmed {
-      isAskArmed = false
-      onAskRelease?()
+    if askComboValue.keyCode == nil {
+      let ask = askComboValue.matches(flags: flags, keyCode: nil)
+      if isToggleMode() {
+        edgeToggleAsk(matching: ask)
+      } else if ask, !isAskArmed {
+        isAskArmed = true
+        onAskPress?()
+      } else if !ask, isAskArmed {
+        isAskArmed = false
+        onAskRelease?()
+      }
     }
   }
 
-  private static func isPushToTalk(_ flags: NSEvent.ModifierFlags) -> Bool {
-    HotkeyCombo.pushToTalk.matches(flags: flags, keyCode: nil)
+  /// Rising edge of the chord: first tap starts, second tap stops. Release does nothing.
+  private func edgeToggleDictate(matching: Bool) {
+    if matching {
+      guard !dictateChordHeld else { return }
+      dictateChordHeld = true
+      if isArmed {
+        isArmed = false
+        onRelease?()
+      } else {
+        isArmed = true
+        onPress?()
+      }
+    } else {
+      dictateChordHeld = false
+    }
+  }
+
+  private func edgeToggleAsk(matching: Bool) {
+    if matching {
+      guard !askChordHeld else { return }
+      askChordHeld = true
+      if isAskArmed {
+        isAskArmed = false
+        onAskRelease?()
+      } else {
+        isAskArmed = true
+        onAskPress?()
+      }
+    } else {
+      askChordHeld = false
+    }
+  }
+
+  @discardableResult
+  private func handleKey(_ event: NSEvent) -> Bool {
+    if isPaused { return false }
+    if event.isARepeat { return false }
+
+    let dictate = dictateCombo()
+    let ask = askCombo()
+    let down = event.type == .keyDown
+
+    var consumed = false
+
+    if let expected = dictate.keyCode,
+       dictate.matches(flags: event.modifierFlags, keyCode: expected) {
+      if down {
+        if isToggleMode() {
+          if isArmed {
+            isArmed = false
+            onRelease?()
+          } else {
+            isArmed = true
+            onPress?()
+          }
+        } else if !isArmed {
+          isArmed = true
+          onPress?()
+        }
+      } else if !isToggleMode(), isArmed {
+        isArmed = false
+        onRelease?()
+      }
+      consumed = true
+    }
+
+    if let expected = ask.keyCode,
+       ask.matches(flags: event.modifierFlags, keyCode: expected) {
+      if down {
+        if isToggleMode() {
+          if isAskArmed {
+            isAskArmed = false
+            onAskRelease?()
+          } else {
+            isAskArmed = true
+            onAskPress?()
+          }
+        } else if !isAskArmed {
+          isAskArmed = true
+          onAskPress?()
+        }
+      } else if !isToggleMode(), isAskArmed {
+        isAskArmed = false
+        onAskRelease?()
+      }
+      consumed = true
+    }
+
+    return consumed
   }
 
   private func shouldConfirmBeforeArming() -> Bool {
-    let combo = rephraseCombo()
-    guard combo.keyCode == nil else { return false }
-    return combo.usesControl && combo.usesOption && (combo.usesCommand || combo.usesShift)
+    let dictate = dictateCombo()
+    let rephrase = rephraseCombo()
+    guard rephrase.keyCode == nil else { return false }
+    guard rephrase.modifierCount > dictate.modifierCount else { return false }
+    if dictate.usesControl && !rephrase.usesControl { return false }
+    if dictate.usesOption && !rephrase.usesOption { return false }
+    if dictate.usesCommand && !rephrase.usesCommand { return false }
+    if dictate.usesShift && !rephrase.usesShift { return false }
+    return true
   }
 
   private func scheduleArm() {
@@ -221,7 +366,7 @@ final class GlobalHoldHotKey {
     armTask = Task { @MainActor in
       try? await Task.sleep(nanoseconds: Self.pressConfirmDelayNs)
       guard !Task.isCancelled else { return }
-      guard Self.isPushToTalk(NSEvent.modifierFlags), !self.isArmed else { return }
+      guard self.dictateCombo().matches(flags: NSEvent.modifierFlags, keyCode: nil), !self.isArmed else { return }
       self.isArmed = true
       self.onPress?()
     }

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct KeysSectionView: View {
@@ -120,7 +121,6 @@ struct KeysSectionView: View {
 
 struct AppTonesSectionView: View {
   @ObservedObject var settings: AppSettingsStore
-  @ObservedObject var session: DictationSession
 
   var body: some View {
     ScrollView {
@@ -143,9 +143,6 @@ struct AppTonesSectionView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-
-        askChatCard
-        rephraseHotkeyCard
 
         VStack(alignment: .leading, spacing: 12) {
           Text("Tone per application")
@@ -191,71 +188,6 @@ struct AppTonesSectionView: View {
       return "On — local tone rewrite per app. Do nothing skips rewrite. Add an OpenAI key for full LLM rephrasing."
     }
     return "On — local tone + OpenAI rephrase per app. Do nothing pastes as spoken even with an OpenAI key."
-  }
-
-  private var askChatCard: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      Text("Ask ChatGPT")
-        .font(.headline)
-      Text("Hold Option+Command, speak a request (for example “write an email to HR about a salary increment”), then release. ChatGPT’s reply pastes into the focused app with paragraphs and punctuation. Requires an OpenAI key.")
-        .font(.caption)
-        .foregroundStyle(.secondary)
-      Text(HotkeyCombo.askChat.displayName)
-        .font(.system(.body, design: .rounded).monospaced())
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(WFTheme.accentSoft)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-    }
-    .padding(16)
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .background(cardBackground)
-    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-  }
-
-  private var rephraseHotkeyCard: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      Text("Rephrase anywhere")
-        .font(.headline)
-      Text("Select text in any app, then press this shortcut (default Control+Command). Uses that app’s tone, or General if the app is Do nothing.")
-        .font(.caption)
-        .foregroundStyle(.secondary)
-
-      HStack(spacing: 12) {
-        Text(settings.rephraseHotkey.displayName)
-          .font(.system(.body, design: .rounded).monospaced())
-          .padding(.horizontal, 10)
-          .padding(.vertical, 6)
-          .background(WFTheme.accentSoft)
-          .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-
-        if session.isRecordingRephraseHotkey {
-          Text("Press the new shortcut…")
-            .font(.caption)
-            .foregroundStyle(WFTheme.accent)
-          Button("Cancel") {
-            session.setRecordingRephraseHotkey(false)
-          }
-          .buttonStyle(.bordered)
-        } else {
-          Button("Change shortcut") {
-            session.setRecordingRephraseHotkey(true)
-          }
-          .buttonStyle(.bordered)
-          Button("Reset") {
-            settings.resetRephraseHotkey()
-          }
-          .buttonStyle(.bordered)
-        }
-      }
-    }
-    .padding(16)
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .background(cardBackground)
-    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-    .onDisappear {
-      session.setRecordingRephraseHotkey(false)
-    }
   }
 
   private var cardBackground: some View {
@@ -373,6 +305,23 @@ struct PermissionsSectionView: View {
           .foregroundStyle(.secondary)
       } header: {
         Text("Microphone")
+      }
+
+      Section {
+        Text("Note Taker → System audio needs Screen Recording. CasperFlow does not save the screen; it only reads playback audio.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        Button("Open Screen Recording…") {
+          let candidates = [
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+            "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ScreenCapture",
+          ]
+          for raw in candidates {
+            if let url = URL(string: raw), NSWorkspace.shared.open(url) { return }
+          }
+        }
+      } header: {
+        Text("Screen Recording")
       }
     }
     .formStyle(.grouped)

@@ -156,3 +156,24 @@ enum AppAppearance: String, CaseIterable, Codable, Identifiable, Sendable {
     }
   }
 }
+
+enum PushToTalkStyle: String, CaseIterable, Identifiable, Sendable {
+  case hold
+  case toggle
+
+  var id: String { rawValue }
+
+  var title: String {
+    switch self {
+    case .hold: return "Hold to talk"
+    case .toggle: return "Press to start / press to stop"
+    }
+  }
+
+  var detail: String {
+    switch self {
+    case .hold: return "Keep the shortcut down while you speak. Release to paste."
+    case .toggle: return "Tap the shortcut once to start. Tap the same shortcut again to stop and paste."
+    }
+  }
+}

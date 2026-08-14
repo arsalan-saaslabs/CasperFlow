@@ -12,7 +12,7 @@ struct DictationSectionView: View {
         controls
         levelMeter
         transcript
-        Text("Hold Ctrl+Option to dictate. Hold Option+Command to ask ChatGPT (needs an OpenAI key). Select text and press \(settings.rephraseHotkey.displayName) to rephrase. Do nothing apps skip rewrite on dictate.")
+        Text("Hold \(settings.dictateHotkey.displayName) to dictate into the focused app (microphone). Use Note taker to transcribe a video via system audio.")
           .font(.caption)
           .foregroundStyle(.secondary)
       }
@@ -21,11 +21,17 @@ struct DictationSectionView: View {
   }
 
   private var header: some View {
-    VStack(alignment: .leading, spacing: 6) {
-      Text("Dictation")
-        .font(.system(size: 28, weight: .semibold, design: .rounded))
-      Text("Speak naturally — text pastes at the caret")
-        .foregroundStyle(.secondary)
+    HStack(alignment: .center, spacing: 12) {
+      VStack(alignment: .leading, spacing: 6) {
+        Text("Dictation")
+          .font(.system(size: 28, weight: .semibold, design: .rounded))
+        Text("Speak naturally — text pastes at the caret")
+          .foregroundStyle(.secondary)
+      }
+      Spacer()
+      if isArmed {
+        ListeningPulse(isActive: true, tint: session.phase == .listening ? .green : .orange)
+      }
     }
   }
 
@@ -40,12 +46,12 @@ struct DictationSectionView: View {
       )
       statusChip(
         title: session.globalHotkeyActive ? "Global ON" : "Global OFF",
-        subtitle: "Ctrl+Option",
+        subtitle: settings.dictateHotkey.displayName,
         tint: session.globalHotkeyActive ? .green : .orange
       )
       statusChip(
         title: "Ask ChatGPT",
-        subtitle: HotkeyCombo.askChat.displayName,
+        subtitle: settings.askHotkey.displayName,
         tint: WFTheme.accent
       )
       statusChip(
@@ -102,13 +108,15 @@ struct DictationSectionView: View {
   }
 
   private var levelMeter: some View {
-    VStack(alignment: .leading, spacing: 6) {
+    VStack(alignment: .leading, spacing: 8) {
+      LiveWaveform(level: session.level, isActive: isArmed)
       GeometryReader { geo in
         ZStack(alignment: .leading) {
           Capsule().fill(Color.secondary.opacity(0.15))
           Capsule()
             .fill(session.didClipRecently ? Color.red : WFTheme.accent)
             .frame(width: max(0, geo.size.width * CGFloat(session.level)))
+            .animation(.easeOut(duration: 0.12), value: session.level)
         }
       }
       .frame(height: 8)
@@ -116,8 +124,10 @@ struct DictationSectionView: View {
         Text("Clipping — back off the mic a little")
           .font(.caption2)
           .foregroundStyle(.red)
+          .transition(.opacity)
       }
     }
+    .animation(.easeInOut(duration: 0.2), value: isArmed)
   }
 
   private var transcript: some View {
@@ -135,6 +145,8 @@ struct DictationSectionView: View {
             .italic()
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .contentTransition(.opacity)
+            .animation(.easeOut(duration: 0.15), value: session.pendingPartial)
         }
         if session.fullTranscript.isEmpty && session.pendingPartial.isEmpty {
           Text("Transcript appears here while you dictate…")
@@ -171,6 +183,8 @@ struct HoldButton: View {
       .background(isActive || pressed ? Color.red.opacity(0.85) : WFTheme.accent)
       .foregroundStyle(.white)
       .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+      .scaleEffect(isActive || pressed ? 1.04 : 1)
+      .animation(.spring(response: 0.28, dampingFraction: 0.72), value: isActive || pressed)
       .gesture(
         DragGesture(minimumDistance: 0)
           .onChanged { _ in

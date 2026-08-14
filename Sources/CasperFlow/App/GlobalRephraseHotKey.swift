@@ -7,6 +7,7 @@ import Foundation
 final class GlobalRephraseHotKey {
   var onFire: (() -> Void)?
   var onRecorded: ((HotkeyCombo) -> Void)?
+  var isValidRecorded: ((HotkeyCombo) -> Bool)?
 
   private var combo: HotkeyCombo
   private var localFlagsMonitor: Any?
@@ -58,8 +59,9 @@ final class GlobalRephraseHotKey {
       self?.handleKeyDown(event) ?? false
     }
 
-    localFlagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { event in
+    localFlagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
       flagsHandler(event)
+      if self?.isRecording == true { return nil }
       return event
     }
     globalFlagsMonitor = NSEvent.addGlobalMonitorForEvents(
@@ -67,7 +69,8 @@ final class GlobalRephraseHotKey {
       handler: flagsHandler
     )
 
-    localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+    localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
+      if event.type == .keyUp, self?.isRecording == true { return nil }
       let consumed = self?.handleKeyDown(event) ?? false
       return consumed ? nil : event
     }
@@ -110,12 +113,14 @@ final class GlobalRephraseHotKey {
   @discardableResult
   private func handleKeyDown(_ event: NSEvent) -> Bool {
     if isRecording {
-      if let recorded = HotkeyCombo.from(event: event), recorded.isValidRephraseShortcut {
+      if event.isARepeat { return true }
+      if Self.isModifierKeyCode(event.keyCode) { return true }
+      if let recorded = HotkeyCombo.from(event: event) {
         recordingModifiers = nil
         onRecorded?(recorded)
         return true
       }
-      return false
+      return true
     }
 
     guard let expected = combo.keyCode else { return false }
@@ -137,13 +142,22 @@ final class GlobalRephraseHotKey {
       keyCode: nil,
       keyLabel: ""
     )
-    if held.modifierCount >= 2 {
+    if held.modifierCount >= 1 {
       recordingModifiers = held
       return
     }
-    if held.modifierCount == 0, let pending = recordingModifiers, pending.isValidRephraseShortcut {
+    if held.modifierCount == 0, let pending = recordingModifiers {
       recordingModifiers = nil
       onRecorded?(pending)
+    }
+  }
+
+  private static func isModifierKeyCode(_ keyCode: UInt16) -> Bool {
+    switch keyCode {
+    case 54, 55, 56, 57, 58, 59, 60, 61, 62, 63:
+      return true
+    default:
+      return false
     }
   }
 }

@@ -1,8 +1,10 @@
 import SwiftUI
 
-/// Entry point — multi-section shell lives in `RootView`.
+/// Kept for previews; the app entry point is `CasperFlowApp`.
 struct ContentView: View {
+  @ObservedObject var session: DictationSession
+
   var body: some View {
-    RootView()
+    RootView(session: session)
   }
 }

@@ -50,6 +50,7 @@ final class AudioCaptureEngine: NSObject {
     }
 
     converter = AVAudioConverter(from: inputFormat, to: targetFormat)
+    converter?.sampleRateConverterAlgorithm = AVSampleRateConverterAlgorithm_Mastering
     guard converter != nil else {
       throw AudioCaptureError.converterFailed
     }

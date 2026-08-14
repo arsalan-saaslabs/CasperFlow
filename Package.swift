@@ -10,7 +10,10 @@ let package = Package(
   targets: [
     .executableTarget(
       name: "CasperFlow",
-      path: "Sources/CasperFlow"
+      path: "Sources/CasperFlow",
+      linkerSettings: [
+        .linkedFramework("ScreenCaptureKit"),
+      ]
     ),
   ]
 )

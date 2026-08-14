@@ -17,6 +17,21 @@ struct LexiconCorrector: Sendable {
     self.rules = rules
   }
 
+  /// User terms win over built-in rules. Heard phrases are matched as literals, not regex.
+  func applyingUserTerms(_ terms: [VocabularyTerm]) -> LexiconCorrector {
+    guard !terms.isEmpty else { return self }
+    return LexiconCorrector(rules: Self.rules(fromUserTerms: terms) + rules)
+  }
+
+  static func rules(fromUserTerms terms: [VocabularyTerm]) -> [Rule] {
+    terms.compactMap { term in
+      let escaped = NSRegularExpression.escapedPattern(for: term.heard)
+      let pattern = "(?i)\\b\(escaped)\\b"
+      guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+      return Rule(pattern: regex, replacement: NSRegularExpression.escapedTemplate(for: term.replacement))
+    }
+  }
+
   func correct(_ text: String) -> String {
     guard !text.isEmpty else { return text }
 

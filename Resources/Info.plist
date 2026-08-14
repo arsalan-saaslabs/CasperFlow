@@ -17,9 +17,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.1.0</string>
+	<string>0.2.0</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>2</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<key>LSApplicationCategoryType</key>
@@ -28,6 +28,10 @@
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>CasperFlow needs the microphone to stream speech to PyAI Hear for dictation.</string>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>CasperFlow captures system audio so Note Taker can transcribe videos and other apps. Screen video is not saved.</string>
+	<key>CasperFlowSupportEmail</key>
+	<string></string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>CasperFlow uses automation to detect the frontmost app and insert dictation text.</string>
 </dict>

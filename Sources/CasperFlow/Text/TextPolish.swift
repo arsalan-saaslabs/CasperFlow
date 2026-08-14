@@ -20,29 +20,40 @@ struct TextPolish: Sendable {
     _ text: String,
     stage: Stage,
     tone: WritingTone = .general,
-    toneEnabled: Bool = true
+    toneEnabled: Bool = true,
+    userTerms: [VocabularyTerm] = [],
+    stripFillers: Bool = false
   ) -> String {
     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return "" }
 
+    let activeLexicon = lexicon.applyingUserTerms(userTerms)
     var output: String
     let rewrite = toneEnabled && tone.appliesRewrite
     switch stage {
     case .live:
-      output = lexicon.correctStreaming(trimmed)
+      output = activeLexicon.correctStreaming(trimmed)
+      if stripFillers {
+        output = FillerStripper.strip(output)
+      }
       if rewrite {
         output = Punctuator.format(output, stage: .live, tone: tone)
         output = LocalToneRewriter.apply(output, tone: tone)
       }
     case .committed:
-      output = lexicon.correct(trimmed)
-      if rewrite {
+      output = activeLexicon.correct(trimmed)
+      if stripFillers {
+        output = FillerStripper.strip(output)
+      }
+      if rewrite || stripFillers {
         if tone != .developer {
           output = LocalSpellCorrector.correct(output)
-          output = lexicon.correct(output)
+          output = activeLexicon.correct(output)
         }
-        output = Punctuator.format(output, stage: .committed, tone: tone)
-        output = LocalToneRewriter.apply(output, tone: tone)
+        output = Punctuator.format(output, stage: .committed, tone: stripFillers ? .general : tone)
+        if rewrite {
+          output = LocalToneRewriter.apply(output, tone: tone)
+        }
       }
     }
     return output

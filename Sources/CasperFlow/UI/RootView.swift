@@ -2,15 +2,8 @@ import SwiftUI
 
 struct RootView: View {
   @ObservedObject private var settings = AppSettingsStore.shared
-  @StateObject private var session: DictationSession
+  @ObservedObject var session: DictationSession
   @State private var section: AppSection = .dictation
-
-  init() {
-    let store = AppSettingsStore.shared
-    _session = StateObject(
-      wrappedValue: DictationSession(apiKey: store.pyaiApiKey, settings: store)
-    )
-  }
 
   var body: some View {
     NavigationSplitView {
@@ -89,14 +82,24 @@ struct RootView: View {
     switch section {
     case .dictation:
       DictationSectionView(session: session, settings: settings)
+    case .notes:
+      NotesSectionView(session: session)
     case .keys:
       KeysSectionView(settings: settings)
+    case .shortcuts:
+      ShortcutsSectionView(settings: settings, session: session)
+    case .history:
+      HistorySectionView(settings: settings)
+    case .vocabulary:
+      VocabularySectionView()
     case .appTones:
-      AppTonesSectionView(settings: settings, session: session)
+      AppTonesSectionView(settings: settings)
     case .appearance:
       AppearanceSectionView(settings: settings)
     case .permissions:
       PermissionsSectionView(session: session)
+    case .diagnostics:
+      DiagnosticsSectionView(session: session)
     }
   }
 }

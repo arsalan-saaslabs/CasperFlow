@@ -16,6 +16,9 @@ struct HearConfig: Sendable {
   var endpointingMs: Int = 800
   var numerals: Bool = true
 
+  /// Longer pauses in meetings/videos so Hear does not split mid-sentence.
+  static let notes = HearConfig(endpointingMs: 2_000)
+
   func streamURL() -> URL {
     var components = URLComponents(string: "wss://api.pyai.com/v1/audio/transcriptions/stream")!
     components.queryItems = [
@@ -54,7 +57,10 @@ final class HearClient: NSObject, URLSessionWebSocketDelegate, @unchecked Sendab
     self.session = URLSession(configuration: conf, delegate: self, delegateQueue: nil)
   }
 
+  private var ignoreTransportErrors = false
+
   func connect() {
+    ignoreTransportErrors = false
     var request = URLRequest(url: config.streamURL())
     request.timeoutInterval = 30
     request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
@@ -66,11 +72,11 @@ final class HearClient: NSObject, URLSessionWebSocketDelegate, @unchecked Sendab
 
   func disconnect() {
     stateLock.lock()
+    ignoreTransportErrors = true
     isOpen = false
     stateLock.unlock()
     task?.cancel(with: .goingAway, reason: nil)
     task = nil
-    DispatchQueue.main.async { self.onDisconnected?() }
   }
 
   func sendPCM16(_ samples: [Int16]) {
@@ -86,10 +92,16 @@ final class HearClient: NSObject, URLSessionWebSocketDelegate, @unchecked Sendab
       Data(bytes: ptr.baseAddress!, count: byteCount)
     }
     socket.send(.data(pcmData)) { [weak self] error in
-      if let error {
-        DispatchQueue.main.async {
-          self?.onEvent?(.error(message: error.localizedDescription))
-        }
+      guard let self, let error else { return }
+      self.stateLock.lock()
+      let ignore = self.ignoreTransportErrors || !self.isOpen
+      self.stateLock.unlock()
+      if ignore || Self.isSocketClosed(error) {
+        AppLog.info("Hear send skipped: \(error.localizedDescription)")
+        return
+      }
+      DispatchQueue.main.async {
+        self.onEvent?(.error(message: error.localizedDescription))
       }
     }
   }
@@ -108,13 +120,21 @@ final class HearClient: NSObject, URLSessionWebSocketDelegate, @unchecked Sendab
       guard let self else { return }
       switch result {
       case .failure(let error):
+        self.stateLock.lock()
+        let ignore = self.ignoreTransportErrors
+        self.isOpen = false
+        self.stateLock.unlock()
         DispatchQueue.main.async {
+          if ignore || Self.isSocketClosed(error) {
+            AppLog.info("Hear receive ended: \(error.localizedDescription)")
+            if !ignore {
+              self.onDisconnected?()
+            }
+            return
+          }
           self.onEvent?(.error(message: error.localizedDescription))
           self.onDisconnected?()
         }
-        self.stateLock.lock()
-        self.isOpen = false
-        self.stateLock.unlock()
       case .success(let message):
         self.handle(message)
         if self.task != nil {
@@ -164,6 +184,11 @@ final class HearClient: NSObject, URLSessionWebSocketDelegate, @unchecked Sendab
     DispatchQueue.main.async { self.onEvent?(event) }
   }
 
+  private static func isSocketClosed(_ error: Error) -> Bool {
+    let text = error.localizedDescription.lowercased()
+    return text.contains("socket is not connected") || text.contains("not connected")
+  }
+
   func urlSession(
     _ session: URLSession,
     webSocketTask: URLSessionWebSocketTask,
@@ -182,8 +207,10 @@ final class HearClient: NSObject, URLSessionWebSocketDelegate, @unchecked Sendab
     reason: Data?
   ) {
     stateLock.lock()
+    let ignore = ignoreTransportErrors
     isOpen = false
     stateLock.unlock()
+    guard !ignore else { return }
     DispatchQueue.main.async { self.onDisconnected?() }
   }
 }
