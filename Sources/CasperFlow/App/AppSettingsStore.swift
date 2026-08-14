@@ -1,7 +1,7 @@
 import Combine
 import Foundation
 
-/// Persisted app preferences (keys, theme, per-app tones, tone toggle).
+/// Persisted app preferences (keys, theme, per-app tones, tone toggle, hotkeys).
 @MainActor
 final class AppSettingsStore: ObservableObject {
   static let shared = AppSettingsStore()
@@ -12,6 +12,7 @@ final class AppSettingsStore: ObservableObject {
     static let appearance = "settings.appearance"
     static let toneEnabled = "settings.tonePolishEnabled"
     static let toneOverrides = "settings.toneOverrides"
+    static let rephraseHotkey = "settings.rephraseHotkey"
   }
 
   @Published var pyaiApiKey: String {
@@ -36,6 +37,11 @@ final class AppSettingsStore: ObservableObject {
     didSet { UserDefaults.standard.set(toneOverrides, forKey: Keys.toneOverrides) }
   }
 
+  /// Global shortcut that rephrases the current selection in any app.
+  @Published var rephraseHotkey: HotkeyCombo {
+    didSet { persistRephraseHotkey() }
+  }
+
   private init() {
     let defaults = UserDefaults.standard
     let fromEnv = ProcessInfo.processInfo.environment["PYAI_API_KEY"] ?? ""
@@ -55,6 +61,7 @@ final class AppSettingsStore: ObservableObject {
       tonePolishEnabled = defaults.bool(forKey: Keys.toneEnabled)
     }
     toneOverrides = defaults.dictionary(forKey: Keys.toneOverrides) as? [String: String] ?? [:]
+    rephraseHotkey = Self.loadRephraseHotkey(from: defaults)
   }
 
   func tone(for profile: AppToneProfile) -> WritingTone {
@@ -84,6 +91,28 @@ final class AppSettingsStore: ObservableObject {
 
   func resetToneOverrides() {
     toneOverrides = [:]
+  }
+
+  func resetRephraseHotkey() {
+    rephraseHotkey = .defaultRephrase
+  }
+
+  private func persistRephraseHotkey() {
+    guard let data = try? JSONEncoder().encode(rephraseHotkey) else { return }
+    UserDefaults.standard.set(data, forKey: Keys.rephraseHotkey)
+  }
+
+  private static func loadRephraseHotkey(from defaults: UserDefaults) -> HotkeyCombo {
+    guard let data = defaults.data(forKey: Keys.rephraseHotkey),
+          let combo = try? JSONDecoder().decode(HotkeyCombo.self, from: data),
+          combo.isValidRephraseShortcut
+    else {
+      return .defaultRephrase
+    }
+    if combo == .legacyDefaultRephrase {
+      return .defaultRephrase
+    }
+    return combo
   }
 
   private static func loadPyaiFromRepoEnv() -> String? {

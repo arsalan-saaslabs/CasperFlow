@@ -92,7 +92,7 @@ struct RootView: View {
     case .keys:
       KeysSectionView(settings: settings)
     case .appTones:
-      AppTonesSectionView(settings: settings)
+      AppTonesSectionView(settings: settings, session: session)
     case .appearance:
       AppearanceSectionView(settings: settings)
     case .permissions:

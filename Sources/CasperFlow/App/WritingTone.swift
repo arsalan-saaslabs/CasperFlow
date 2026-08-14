@@ -1,7 +1,8 @@
 import Foundation
 
-/// User-selectable writing tone applied after STT (local rules; optional LLM later).
+/// User-selectable writing tone applied after STT (local rules; optional LLM).
 enum WritingTone: String, CaseIterable, Codable, Identifiable, Sendable {
+  case doNothing
   case casual
   case professional
   case developer
@@ -11,6 +12,7 @@ enum WritingTone: String, CaseIterable, Codable, Identifiable, Sendable {
 
   var displayName: String {
     switch self {
+    case .doNothing: return "Do nothing"
     case .casual: return "Casual"
     case .professional: return "Professional"
     case .developer: return "Developer"
@@ -20,11 +22,17 @@ enum WritingTone: String, CaseIterable, Codable, Identifiable, Sendable {
 
   var detail: String {
     switch self {
+    case .doNothing: return "Paste as spoken — no rewrite"
     case .casual: return "Relaxed caps, no forced periods"
     case .professional: return "Sentence caps + trailing period"
     case .developer: return "Light punctuation, skip spellcheck"
     case .general: return "Balanced punctuation"
     }
+  }
+
+  /// Local punctuation / OpenAI rewrite. Lexicon STT fixes still run.
+  var appliesRewrite: Bool {
+    self != .doNothing
   }
 }
 

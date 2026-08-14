@@ -28,7 +28,7 @@ struct KeysSectionView: View {
 
         keyCard(
           title: "OpenAI",
-          subtitle: "Optional — for future LLM tone rewrite",
+          subtitle: "Optional for tone rewrite; required for Ask ChatGPT (Option+Command)",
           placeholder: "OPENAI_API_KEY",
           text: $openAIDraft,
           revealed: $showOpenAI
@@ -46,7 +46,7 @@ struct KeysSectionView: View {
           }
         }
 
-        Text("OpenAI enables full LLM tone rewrite on commit. Local tone still works with PyAI alone.")
+        Text("OpenAI rewrites dictation tone (except Do nothing) and writes Ask ChatGPT replies. Local tone still works with PyAI alone.")
           .font(.caption)
           .foregroundStyle(.secondary)
       }
@@ -120,6 +120,7 @@ struct KeysSectionView: View {
 
 struct AppTonesSectionView: View {
   @ObservedObject var settings: AppSettingsStore
+  @ObservedObject var session: DictationSession
 
   var body: some View {
     ScrollView {
@@ -127,7 +128,7 @@ struct AppTonesSectionView: View {
         VStack(alignment: .leading, spacing: 6) {
           Text("App tones")
             .font(.system(size: 28, weight: .semibold, design: .rounded))
-          Text("Rephrase dictation to match each app")
+          Text("Rephrase dictation to match each app. Do nothing pastes as spoken.")
             .foregroundStyle(.secondary)
         }
 
@@ -142,6 +143,9 @@ struct AppTonesSectionView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+        askChatCard
+        rephraseHotkeyCard
 
         VStack(alignment: .leading, spacing: 12) {
           Text("Tone per application")
@@ -184,9 +188,74 @@ struct AppTonesSectionView: View {
       return "Off — only lexicon cleanup (no casual/professional rewrite)."
     }
     if settings.openAIApiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-      return "On — local tone rewrite (hey→Hello, gonna→going to, …). Add an OpenAI key in API Keys for full LLM rephrasing."
+      return "On — local tone rewrite per app. Do nothing skips rewrite. Add an OpenAI key for full LLM rephrasing."
     }
-    return "On — local tone + OpenAI rephrase before paste (uses your OpenAI key)."
+    return "On — local tone + OpenAI rephrase per app. Do nothing pastes as spoken even with an OpenAI key."
+  }
+
+  private var askChatCard: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      Text("Ask ChatGPT")
+        .font(.headline)
+      Text("Hold Option+Command, speak a request (for example “write an email to HR about a salary increment”), then release. ChatGPT’s reply pastes into the focused app with paragraphs and punctuation. Requires an OpenAI key.")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      Text(HotkeyCombo.askChat.displayName)
+        .font(.system(.body, design: .rounded).monospaced())
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(WFTheme.accentSoft)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+    .padding(16)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(cardBackground)
+    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+  }
+
+  private var rephraseHotkeyCard: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      Text("Rephrase anywhere")
+        .font(.headline)
+      Text("Select text in any app, then press this shortcut (default Control+Command). Uses that app’s tone, or General if the app is Do nothing.")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+
+      HStack(spacing: 12) {
+        Text(settings.rephraseHotkey.displayName)
+          .font(.system(.body, design: .rounded).monospaced())
+          .padding(.horizontal, 10)
+          .padding(.vertical, 6)
+          .background(WFTheme.accentSoft)
+          .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+        if session.isRecordingRephraseHotkey {
+          Text("Press the new shortcut…")
+            .font(.caption)
+            .foregroundStyle(WFTheme.accent)
+          Button("Cancel") {
+            session.setRecordingRephraseHotkey(false)
+          }
+          .buttonStyle(.bordered)
+        } else {
+          Button("Change shortcut") {
+            session.setRecordingRephraseHotkey(true)
+          }
+          .buttonStyle(.bordered)
+          Button("Reset") {
+            settings.resetRephraseHotkey()
+          }
+          .buttonStyle(.bordered)
+        }
+      }
+    }
+    .padding(16)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(cardBackground)
+    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    .onDisappear {
+      session.setRecordingRephraseHotkey(false)
+    }
   }
 
   private var cardBackground: some View {
@@ -272,6 +341,9 @@ struct PermissionsSectionView: View {
             .frame(width: 8, height: 8)
           Text(session.globalHotkeyActive ? "Global hotkey + paste ready" : "Accessibility required")
         }
+        Text(GlobalHoldHotKey.isProcessTrusted ? "This process is trusted." : "This process is not trusted yet (toggle can look ON after a rebuild).")
+          .font(.caption)
+          .foregroundStyle(.secondary)
         Text(GlobalHoldHotKey.bundleIdentity)
           .font(.system(.caption2, design: .monospaced))
           .foregroundStyle(.secondary)
@@ -292,7 +364,7 @@ struct PermissionsSectionView: View {
       } header: {
         Text("Accessibility")
       } footer: {
-        Text("Enable CasperFlow.app (not Cursor). Required for Ctrl+Option in other apps and paste-at-caret.")
+        Text("Enable the CasperFlow in ~/Applications (not Cursor, not the Desktop/dist copy). Use Reveal CasperFlow.app then Accessibility → +. Required for Ctrl+Option dictate, Option+Command Ask ChatGPT, rephrase, and paste.")
       }
 
       Section {

@@ -8,6 +8,9 @@ import Foundation
 final class GlobalHoldHotKey {
   var onPress: (() -> Void)?
   var onRelease: (() -> Void)?
+  /// Hold Option+Command: voice command → ChatGPT → paste.
+  var onAskPress: (() -> Void)?
+  var onAskRelease: (() -> Void)?
   /// Fired when trust / monitor status changes.
   var onStatusChange: ((Bool) -> Void)?
 
@@ -15,7 +18,18 @@ final class GlobalHoldHotKey {
   private var globalMonitor: Any?
   private var pollTimer: Timer?
   private var isArmed = false
+  private var isAskArmed = false
+  private var armTask: Task<Void, Never>?
+  private var lastCapable = false
   private(set) var isGlobalActive = false
+  private static let trustPollInterval: TimeInterval = 1.0
+
+  /// When the rephrase shortcut is a longer modifier chord (default ⌃⌥⌘),
+  /// wait this long so Command can join before PTT starts.
+  private static let pressConfirmDelayNs: UInt64 = 80_000_000
+
+  /// Return the current rephrase shortcut so PTT can yield to a longer chord.
+  var rephraseCombo: () -> HotkeyCombo = { .defaultRephrase }
 
   static var isProcessTrusted: Bool {
     AXIsProcessTrusted()
@@ -31,14 +45,17 @@ final class GlobalHoldHotKey {
     _ = Self.requestTrust(prompt: true)
     installMonitors()
     startPollingTrust()
-    onStatusChange?(canInterceptOtherApps)
+    publishCapability()
   }
 
   func stop() {
     pollTimer?.invalidate()
     pollTimer = nil
+    armTask?.cancel()
+    armTask = nil
     stopMonitorsOnly()
     isArmed = false
+    isAskArmed = false
     isGlobalActive = false
   }
 
@@ -46,7 +63,7 @@ final class GlobalHoldHotKey {
   func reinstall() {
     stopMonitorsOnly()
     installMonitors()
-    onStatusChange?(canInterceptOtherApps)
+    publishCapability()
   }
 
   @discardableResult
@@ -135,36 +152,78 @@ final class GlobalHoldHotKey {
     isGlobalActive = false
   }
 
+  private func publishCapability() {
+    lastCapable = canInterceptOtherApps
+    onStatusChange?(lastCapable)
+  }
+
   private func startPollingTrust() {
     pollTimer?.invalidate()
-    // While Settings is open, trust can flip; reinstall global monitor when it does.
-    pollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+    // While Settings is open, trust can flip; update UI without tearing down monitors
+    // every second (that leaked monitors and pegged CPU when untrusted).
+    pollTimer = Timer.scheduledTimer(withTimeInterval: Self.trustPollInterval, repeats: true) { [weak self] _ in
       Task { @MainActor in
         guard let self else { return }
         let trusted = Self.isProcessTrusted
-        let needsGlobal = trusted && !self.isGlobalActive
-        let lostGlobal = !trusted && self.isGlobalActive
-        if needsGlobal || lostGlobal {
+        if trusted, !self.isGlobalActive {
           self.reinstall()
+          return
+        }
+        let capable = self.canInterceptOtherApps
+        if capable != self.lastCapable {
+          self.publishCapability()
         }
       }
     }
   }
 
   private func handleFlags(_ flags: NSEvent.ModifierFlags) {
-    let mods = flags.intersection(.deviceIndependentFlagsMask)
-    let hold =
-      mods.contains(.control)
-      && mods.contains(.option)
-      && !mods.contains(.command)
-      && !mods.contains(.shift)
+    let hold = Self.isPushToTalk(flags)
+    let ask = HotkeyCombo.askChat.matches(flags: flags, keyCode: nil)
 
     if hold, !isArmed {
-      isArmed = true
-      onPress?()
-    } else if !hold, isArmed {
-      isArmed = false
-      onRelease?()
+      if shouldConfirmBeforeArming() {
+        scheduleArm()
+      } else {
+        isArmed = true
+        onPress?()
+      }
+    } else if !hold {
+      armTask?.cancel()
+      armTask = nil
+      if isArmed {
+        isArmed = false
+        onRelease?()
+      }
+    }
+
+    if ask, !isAskArmed {
+      isAskArmed = true
+      onAskPress?()
+    } else if !ask, isAskArmed {
+      isAskArmed = false
+      onAskRelease?()
+    }
+  }
+
+  private static func isPushToTalk(_ flags: NSEvent.ModifierFlags) -> Bool {
+    HotkeyCombo.pushToTalk.matches(flags: flags, keyCode: nil)
+  }
+
+  private func shouldConfirmBeforeArming() -> Bool {
+    let combo = rephraseCombo()
+    guard combo.keyCode == nil else { return false }
+    return combo.usesControl && combo.usesOption && (combo.usesCommand || combo.usesShift)
+  }
+
+  private func scheduleArm() {
+    armTask?.cancel()
+    armTask = Task { @MainActor in
+      try? await Task.sleep(nanoseconds: Self.pressConfirmDelayNs)
+      guard !Task.isCancelled else { return }
+      guard Self.isPushToTalk(NSEvent.modifierFlags), !self.isArmed else { return }
+      self.isArmed = true
+      self.onPress?()
     }
   }
 }

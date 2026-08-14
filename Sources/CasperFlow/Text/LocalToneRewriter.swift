@@ -7,6 +7,8 @@ enum LocalToneRewriter {
     guard !trimmed.isEmpty else { return "" }
 
     switch tone {
+    case .doNothing:
+      return trimmed
     case .casual:
       return applyCasual(trimmed)
     case .professional:

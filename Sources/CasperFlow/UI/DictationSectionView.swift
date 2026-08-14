@@ -12,7 +12,7 @@ struct DictationSectionView: View {
         controls
         levelMeter
         transcript
-        Text("Hold Ctrl+Option in any app. Tone polish runs live while you speak when enabled in App tones.")
+        Text("Hold Ctrl+Option to dictate. Hold Option+Command to ask ChatGPT (needs an OpenAI key). Select text and press \(settings.rephraseHotkey.displayName) to rephrase. Do nothing apps skip rewrite on dictate.")
           .font(.caption)
           .foregroundStyle(.secondary)
       }
@@ -42,6 +42,16 @@ struct DictationSectionView: View {
         title: session.globalHotkeyActive ? "Global ON" : "Global OFF",
         subtitle: "Ctrl+Option",
         tint: session.globalHotkeyActive ? .green : .orange
+      )
+      statusChip(
+        title: "Ask ChatGPT",
+        subtitle: HotkeyCombo.askChat.displayName,
+        tint: WFTheme.accent
+      )
+      statusChip(
+        title: "Rephrase",
+        subtitle: settings.rephraseHotkey.displayName,
+        tint: WFTheme.accent
       )
       Spacer()
       Button("Refresh app") { session.refreshFrontmostApp() }
@@ -85,7 +95,10 @@ struct DictationSectionView: View {
   }
 
   private var isArmed: Bool {
-    session.phase == .listening || session.phase == .connecting || session.phase == .finalizing
+    session.phase == .listening
+      || session.phase == .connecting
+      || session.phase == .finalizing
+      || session.phase == .composing
   }
 
   private var levelMeter: some View {
