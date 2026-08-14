@@ -12,7 +12,8 @@ enum OpenAIChatClient {
     temperature: Double,
     timeout: TimeInterval,
     maxTokens: Int?,
-    maxInputCharacters: Int
+    maxInputCharacters: Int,
+    jsonObject: Bool = false
   ) async -> String? {
     let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
     let input = user.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -29,6 +30,9 @@ enum OpenAIChatClient {
     ]
     if let maxTokens {
       body["max_tokens"] = maxTokens
+    }
+    if jsonObject {
+      body["response_format"] = ["type": "json_object"]
     }
 
     guard let json = try? JSONSerialization.data(withJSONObject: body) else { return nil }
@@ -53,7 +57,11 @@ enum OpenAIChatClient {
       else {
         return nil
       }
-      return sanitize(content)
+      let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+      if jsonObject {
+        return trimmed.isEmpty ? nil : trimmed
+      }
+      return sanitize(trimmed)
     } catch {
       return nil
     }

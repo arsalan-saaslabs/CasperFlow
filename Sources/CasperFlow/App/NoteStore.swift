@@ -39,6 +39,16 @@ struct NoteEntry: Codable, Identifiable, Equatable, Hashable, Sendable {
   var createdAt: Date
   var updatedAt: Date
   var source: String
+  var summary: String
+  var actionItems: [String]
+
+  var sourceTitle: String {
+    NoteAudioSource(rawValue: source)?.title ?? source
+  }
+
+  var hasInsights: Bool {
+    !summary.isEmpty || !actionItems.isEmpty
+  }
 
   init(
     id: UUID = UUID(),
@@ -46,7 +56,9 @@ struct NoteEntry: Codable, Identifiable, Equatable, Hashable, Sendable {
     body: String = "",
     createdAt: Date = Date(),
     updatedAt: Date = Date(),
-    source: String
+    source: String,
+    summary: String = "",
+    actionItems: [String] = []
   ) {
     self.id = id
     self.title = title
@@ -54,6 +66,20 @@ struct NoteEntry: Codable, Identifiable, Equatable, Hashable, Sendable {
     self.createdAt = createdAt
     self.updatedAt = updatedAt
     self.source = source
+    self.summary = summary
+    self.actionItems = actionItems
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    id = try container.decode(UUID.self, forKey: .id)
+    title = try container.decode(String.self, forKey: .title)
+    body = try container.decode(String.self, forKey: .body)
+    createdAt = try container.decode(Date.self, forKey: .createdAt)
+    updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+    source = try container.decode(String.self, forKey: .source)
+    summary = try container.decodeIfPresent(String.self, forKey: .summary) ?? ""
+    actionItems = try container.decodeIfPresent([String].self, forKey: .actionItems) ?? []
   }
 }
 
@@ -119,6 +145,14 @@ final class NoteStore: ObservableObject {
       activeNoteId = nil
     }
     notes.removeAll { $0.id == id }
+    persist()
+  }
+
+  func setInsights(id: UUID, summary: String, actionItems: [String]) {
+    guard let index = notes.firstIndex(where: { $0.id == id }) else { return }
+    notes[index].summary = summary
+    notes[index].actionItems = actionItems
+    notes[index].updatedAt = Date()
     persist()
   }
 

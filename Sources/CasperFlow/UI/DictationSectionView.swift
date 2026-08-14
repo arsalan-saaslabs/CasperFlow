@@ -8,6 +8,9 @@ struct DictationSectionView: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 20) {
         header
+        if session.phase == .error {
+          errorBanner
+        }
         statusRow
         controls
         levelMeter
@@ -30,9 +33,37 @@ struct DictationSectionView: View {
       }
       Spacer()
       if isArmed {
-        ListeningPulse(isActive: true, tint: session.phase == .listening ? .green : .orange)
+        Text(session.phase == .listening ? "Listening" : session.statusMessage)
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.secondary)
       }
     }
+  }
+
+  private var errorBanner: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      Text("PyAI / Hear is unavailable")
+        .font(.headline)
+      Text(session.lastError ?? session.statusMessage)
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        .textSelection(.enabled)
+      HStack {
+        Button("Restart") { session.restartAfterError() }
+          .buttonStyle(.borderedProminent)
+          .tint(WFTheme.accent)
+        Button("Dismiss") { session.dismissError() }
+          .buttonStyle(.bordered)
+      }
+    }
+    .padding(14)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(Color.red.opacity(0.08))
+    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    .overlay(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .stroke(Color.red.opacity(0.35), lineWidth: 1)
+    )
   }
 
   private var statusRow: some View {
@@ -109,25 +140,21 @@ struct DictationSectionView: View {
 
   private var levelMeter: some View {
     VStack(alignment: .leading, spacing: 8) {
-      LiveWaveform(level: session.level, isActive: isArmed)
       GeometryReader { geo in
         ZStack(alignment: .leading) {
           Capsule().fill(Color.secondary.opacity(0.15))
           Capsule()
             .fill(session.didClipRecently ? Color.red : WFTheme.accent)
             .frame(width: max(0, geo.size.width * CGFloat(session.level)))
-            .animation(.easeOut(duration: 0.12), value: session.level)
         }
       }
-      .frame(height: 8)
+      .frame(height: 6)
       if session.didClipRecently {
         Text("Clipping — back off the mic a little")
           .font(.caption2)
           .foregroundStyle(.red)
-          .transition(.opacity)
       }
     }
-    .animation(.easeInOut(duration: 0.2), value: isArmed)
   }
 
   private var transcript: some View {
@@ -145,8 +172,6 @@ struct DictationSectionView: View {
             .italic()
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .contentTransition(.opacity)
-            .animation(.easeOut(duration: 0.15), value: session.pendingPartial)
         }
         if session.fullTranscript.isEmpty && session.pendingPartial.isEmpty {
           Text("Transcript appears here while you dictate…")
@@ -159,10 +184,6 @@ struct DictationSectionView: View {
     .background(
       RoundedRectangle(cornerRadius: 14, style: .continuous)
         .fill(WFTheme.panel.opacity(0.9))
-    )
-    .overlay(
-      RoundedRectangle(cornerRadius: 14, style: .continuous)
-        .stroke(WFTheme.accent.opacity(0.18), lineWidth: 1)
     )
   }
 }
