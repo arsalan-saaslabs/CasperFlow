@@ -63,6 +63,8 @@ final class DictationSession: ObservableObject {
   private var appSwitchCancellable: AnyCancellable?
   private var hotkeyCancellable: AnyCancellable?
   private var isRephrasingSelection = false
+  /// OpenAI rewrite + paste jobs still running after the user released the key.
+  private var inFlightPasteCount = 0
   private var captureKind: CaptureKind = .dictate
   /// Spoken instruction captured during an Ask ChatGPT hold (not prior dictation).
   private var askPromptLines: [String] = []
@@ -170,18 +172,22 @@ final class DictationSession: ObservableObject {
     }
     rephraseHotKey.onFire = { [weak self] in
       guard let self, self.recordingAction == nil else { return }
+      guard self.canOpenUtilityOverlay else { return }
       self.rephraseFrontmostSelection()
     }
     historyHotKey.onFire = { [weak self] in
       guard let self, self.recordingAction == nil else { return }
+      guard self.canOpenUtilityOverlay else { return }
       self.toggleHistoryOverlay()
     }
     notesHotKey.onFire = { [weak self] in
       guard let self, self.recordingAction == nil else { return }
+      guard self.canOpenUtilityOverlay else { return }
       self.toggleNoteTaking()
     }
     paletteHotKey.onFire = { [weak self] in
       guard let self, self.recordingAction == nil else { return }
+      guard self.canOpenUtilityOverlay else { return }
       self.toggleCommandOverlay()
     }
     shortcutRecorder.onCapture = { [weak self] combo in
@@ -253,6 +259,7 @@ final class DictationSession: ObservableObject {
   func toggleHistoryOverlay() {
     guard isEngineEnabled else { return }
     guard recordingAction == nil else { return }
+    guard canOpenUtilityOverlay else { return }
     CommandOverlayController.shared.hide()
     HistoryOverlayController.shared.toggle()
   }
@@ -260,7 +267,17 @@ final class DictationSession: ObservableObject {
   func toggleCommandOverlay() {
     guard isEngineEnabled else { return }
     guard recordingAction == nil else { return }
+    guard canOpenUtilityOverlay else { return }
     CommandOverlayController.shared.toggle()
+  }
+
+  /// History / command palette must not open on the same key-up as dictate.
+  private var canOpenUtilityOverlay: Bool {
+    !isHolding
+      && phase != .connecting
+      && phase != .listening
+      && phase != .finalizing
+      && phase != .composing
   }
 
   func setToneForCurrentApp(_ tone: WritingTone) {
@@ -401,12 +418,17 @@ final class DictationSession: ObservableObject {
     isRephrasingSelection = true
     let requestedTone = activeTone.appliesRewrite ? activeTone : .general
     let appName = activeAppName
+    phase = .composing
     statusMessage = "Rephrasing selection (\(requestedTone.displayName))…"
+    pendingPartial = ""
+    syncFloatingHUD()
 
     Task { @MainActor in
       defer { self.isRephrasingSelection = false }
       guard let selected = await FrontmostTextInserter.copySelection() else {
+        self.phase = .idle
         self.statusMessage = "Select text in \(appName), then press \(self.settings.rephraseHotkey.displayName)"
+        self.syncFloatingHUD()
         return
       }
       guard let rewritten = await OpenAIToneRephraser.rephrase(
@@ -415,16 +437,22 @@ final class DictationSession: ObservableObject {
         appName: appName,
         apiKey: openAIKey
       ) else {
+        self.phase = .idle
         self.statusMessage = "OpenAI unavailable — selection left unchanged"
+        self.syncFloatingHUD()
         return
       }
       let pasted = FrontmostTextInserter.paste(rewritten)
       if pasted {
         HistoryStore.shared.add(text: rewritten, kind: .rephrase, appName: appName)
+        self.statusMessage = "Rephrased in \(appName)"
+        self.phase = .idle
+        FloatingHUDController.shared.flashPasted(into: appName)
+      } else {
+        self.phase = .idle
+        self.statusMessage = "Rephrase ready — focus another app to paste"
+        self.syncFloatingHUD()
       }
-      self.statusMessage = pasted
-        ? "Rephrased in \(appName)"
-        : "Rephrase ready — focus another app to paste"
     }
   }
 
@@ -445,11 +473,49 @@ final class DictationSession: ObservableObject {
     }
     FloatingHUDController.shared.sync(
       phase: phase,
-      pending: phase == .error ? (lastError ?? statusMessage) : pendingPartial,
+      pending: hudPendingText(),
       committed: phase == .error ? "" : committed,
       mode: toneLabel,
       level: level
     )
+  }
+
+  private func hudPendingText() -> String {
+    if phase == .error {
+      return lastError ?? statusMessage
+    }
+    if phase == .composing {
+      return statusMessage
+    }
+    return pendingPartial
+  }
+
+  private func finishDictateHold() {
+    if inFlightPasteCount > 0 {
+      phase = .composing
+      if !statusMessage.lowercased().contains("rephras") {
+        statusMessage = "Inserting text — please wait…"
+      }
+      syncFloatingHUD()
+      return
+    }
+    phase = .idle
+    statusMessage = didPasteInThisHold
+      ? "Pasted into \(activeAppName). Hold again to continue."
+      : "Done. Hold again to continue."
+    syncFloatingHUD()
+  }
+
+  private func completePasteJob() {
+    inFlightPasteCount = max(0, inFlightPasteCount - 1)
+    guard inFlightPasteCount == 0, !isHolding, captureKind == .dictate, phase != .error else {
+      return
+    }
+    phase = .idle
+    if !didPasteInThisHold {
+      statusMessage = "Done. Hold again to continue."
+      syncFloatingHUD()
+    }
   }
 
   func refreshFrontmostApp() {
@@ -521,6 +587,8 @@ final class DictationSession: ObservableObject {
     }
 
     captureKind = kind
+    CommandOverlayController.shared.hide()
+    HistoryOverlayController.shared.hide()
     isNoteTaking = kind == .notes
     if kind == .notes {
       NoteStore.shared.beginSession(source: noteAudioSource)
@@ -614,11 +682,7 @@ final class DictationSession: ObservableObject {
         self.statusMessage = "Note saved. Start again to continue."
         self.syncFloatingHUD()
       } else {
-        self.phase = .idle
-        self.statusMessage = self.didPasteInThisHold
-          ? "Pasted into \(self.activeAppName). Hold again to continue."
-          : "Done. Hold again to continue."
-        self.syncFloatingHUD()
+        self.finishDictateHold()
       }
     }
   }
@@ -888,10 +952,22 @@ final class DictationSession: ObservableObject {
       && tone.appliesRewrite
       && !openAIKey.isEmpty
 
+    inFlightPasteCount += 1
+    if useOpenAI, !isHolding {
+      phase = .composing
+      statusMessage = "Rephrasing (\(tone.displayName)) — please wait…"
+      syncFloatingHUD()
+    }
+
     Task { @MainActor in
+      defer { self.completePasteJob() }
       var output = trimmed
       if useOpenAI {
-        self.statusMessage = "Rephrasing (\(tone.displayName))…"
+        self.statusMessage = "Rephrasing (\(tone.displayName)) — please wait…"
+        if !self.isHolding {
+          self.phase = .composing
+          self.syncFloatingHUD()
+        }
         if let rewritten = await OpenAIToneRephraser.rephrase(
           trimmed,
           tone: tone,
@@ -954,7 +1030,6 @@ final class DictationSession: ObservableObject {
     if didPasteInThisHold {
       statusMessage = "Pasted ChatGPT reply into \(appName)"
     }
-    syncFloatingHUD()
   }
 
   /// Paste into the app that currently has the text caret (not CasperFlow).
@@ -993,6 +1068,7 @@ final class DictationSession: ObservableObject {
     phase = .error
     lastFailedKind = captureKind
     isHolding = false
+    inFlightPasteCount = 0
     overlayCaptureActive = false
     if captureKind == .notes {
       NoteStore.shared.cancelIfEmpty()

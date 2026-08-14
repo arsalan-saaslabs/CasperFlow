@@ -230,6 +230,17 @@ struct NotesSectionView: View {
 
       Button("Copy") { copy(note.body) }
         .disabled(note.body.isEmpty)
+
+      Menu("Export") {
+        ForEach(NoteExportFormat.allCases) { format in
+          Button(format.menuTitle) {
+            NoteExporter.presentSavePanel(for: note, format: format)
+          }
+        }
+      }
+      .disabled(note.body.isEmpty && !note.hasInsights)
+      .help("Save as Markdown (Notion, Obsidian) or plain text.")
+
       Button("Delete", role: .destructive) {
         notes.delete(id: note.id)
         if selectedId == note.id { selectedId = nil }

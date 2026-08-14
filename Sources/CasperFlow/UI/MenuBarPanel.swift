@@ -7,12 +7,7 @@ struct MenuBarLabel: View {
   var body: some View {
     Image(systemName: symbolName)
       .symbolRenderingMode(.hierarchical)
-      .symbolEffect(.pulse, isActive: isPulsing)
       .help(helpText)
-  }
-
-  private var isPulsing: Bool {
-    session.isEngineEnabled && (session.phase == .listening || session.phase == .connecting)
   }
 
   private var symbolName: String {

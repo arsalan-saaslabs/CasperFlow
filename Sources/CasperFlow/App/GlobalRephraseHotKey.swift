@@ -52,6 +52,7 @@ final class GlobalRephraseHotKey {
   }
 
   private func installMonitors() {
+    removeMonitors()
     let flagsHandler: (NSEvent) -> Void = { [weak self] event in
       self?.handleFlags(event)
     }
@@ -69,8 +70,8 @@ final class GlobalRephraseHotKey {
       handler: flagsHandler
     )
 
-    localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
-      if event.type == .keyUp, self?.isRecording == true { return nil }
+    localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+      if self?.isRecording == true, event.type == .keyUp { return nil }
       let consumed = self?.handleKeyDown(event) ?? false
       return consumed ? nil : event
     }
@@ -123,6 +124,7 @@ final class GlobalRephraseHotKey {
       return true
     }
 
+    guard event.type == .keyDown else { return false }
     guard let expected = combo.keyCode else { return false }
     guard !event.isARepeat else { return false }
     if combo.matches(flags: event.modifierFlags, keyCode: expected) {
