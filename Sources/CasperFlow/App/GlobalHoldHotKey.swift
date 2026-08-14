@@ -3,7 +3,7 @@ import ApplicationServices
 import Foundation
 
 /// Global hold hotkey: Control + Option.
-/// Works over any app when Accessibility is granted to **this** CasperFlow.app bundle.
+/// Works over any app when Accessibility is granted to **this** Casper.app bundle.
 @MainActor
 final class GlobalHoldHotKey {
   var onPress: (() -> Void)?
@@ -111,17 +111,17 @@ final class GlobalHoldHotKey {
       NSWorkspace.shared.activateFileViewerSelecting([url])
       return
     }
-    // Running unpackaged: prefer dist/CasperFlow.app next to the package.
+    // Running unpackaged: prefer dist/Casper.app next to the package.
     let executable = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
     let candidates = [
       executable
         .deletingLastPathComponent() // MacOS or .build/...
         .deletingLastPathComponent() // Contents or release
-        .appendingPathComponent("CasperFlow.app"),
+        .appendingPathComponent("Casper.app"),
       URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-        .appendingPathComponent("dist/CasperFlow.app"),
+        .appendingPathComponent("dist/Casper.app"),
       URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-        .appendingPathComponent("CasperFlow/dist/CasperFlow.app"),
+        .appendingPathComponent("CasperFlow/dist/Casper.app"),
     ]
     for dist in candidates where FileManager.default.fileExists(atPath: dist.path) {
       NSWorkspace.shared.activateFileViewerSelecting([dist])

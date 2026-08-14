@@ -50,6 +50,8 @@ final class DictationSession: ObservableObject {
   private var capture: AudioCaptureEngine?
   private var systemCapture: SystemAudioCapture?
   private var hear: HearClient?
+  /// Idle dictate/ask socket so the next hold skips most of the handshake.
+  private var warmHear: HearClient?
   /// True after Hear WebSocket opens. Audio is pre-rolled until then.
   private var hearSocketReady = false
   private let preRoll = PreRollBuffer(capacitySamples: AudioConstants.preRollSampleCount)
@@ -169,7 +171,7 @@ final class DictationSession: ObservableObject {
         let ask = self?.settings.askHotkey.displayName ?? "⌥ + ⌘"
         self?.statusMessage = "Global hotkeys armed — hold \(dictate) to dictate, \(ask) to ask ChatGPT"
       } else {
-        self?.statusMessage = "Enable ~/Applications/CasperFlow.app in Accessibility for global hotkeys + paste"
+        self?.statusMessage = "Enable ~/Applications/Casper.app in Accessibility for global hotkeys + paste"
       }
     }
     rephraseHotKey.onFire = { [weak self] in
@@ -214,6 +216,7 @@ final class DictationSession: ObservableObject {
     }
     FloatingHUDController.shared.attach(session: self)
     CommandOverlayController.shared.attach(session: self)
+    warmPreconnect()
   }
 
   /// Pause or resume global hotkeys from the menu bar.
@@ -228,10 +231,12 @@ final class DictationSession: ObservableObject {
       paletteHotKey.start()
       refreshHotKeyAccess()
       statusMessage = "CasperFlow enabled — hotkeys armed"
+      warmPreconnect()
     } else {
       if isHolding {
         endHold()
       }
+      discardWarmHear()
       HistoryOverlayController.shared.hide()
       CommandOverlayController.shared.hide()
       hotKey.stop()
@@ -413,7 +418,7 @@ final class DictationSession: ObservableObject {
       return
     }
     guard GlobalHoldHotKey.isProcessTrusted else {
-      statusMessage = "Enable CasperFlow.app in Accessibility to rephrase in other apps"
+      statusMessage = "Enable Casper.app in Accessibility to rephrase in other apps"
       return
     }
 
@@ -460,34 +465,62 @@ final class DictationSession: ObservableObject {
 
   private func syncFloatingHUD() {
     let toneLabel: String
-    let committed: String
     if captureKind == .ask {
       toneLabel = "Ask ChatGPT · \(activeAppName)"
-      committed = askPromptLines.joined(separator: " ")
     } else if captureKind == .notes {
       toneLabel = "Note taker · \(noteAudioSource.title)"
-      committed = NoteStore.shared.activeNote?.body ?? fullTranscript
     } else {
       toneLabel = settings.tonePolishEnabled
         ? "\(activeProfileName) · \(activeTone.displayName)"
         : "\(activeProfileName) · tone off"
-      committed = fullTranscript
     }
     FloatingHUDController.shared.sync(
       phase: phase,
-      pending: hudPendingText(),
-      committed: phase == .error ? "" : committed,
+      activity: hudActivityTitle(),
+      pending: hudSpeechText(),
+      committed: phase == .error ? (lastError ?? statusMessage) : "",
       mode: toneLabel,
       level: level
     )
   }
 
-  private func hudPendingText() -> String {
+  /// Short HUD title for the current job (not Connecting/Connected).
+  private func hudActivityTitle() -> String {
     if phase == .error {
-      return lastError ?? statusMessage
+      return "Error"
     }
-    if phase == .composing {
-      return statusMessage
+    switch phase {
+    case .connecting:
+      return "Starting"
+    case .listening:
+      if !hearSocketReady {
+        return "Starting"
+      }
+      switch captureKind {
+      case .ask: return "Ask ChatGPT"
+      case .notes: return "Note taker"
+      case .dictate: return "Listening"
+      }
+    case .finalizing:
+      switch captureKind {
+      case .ask: return "Finishing request"
+      case .notes: return "Saving note"
+      case .dictate: return "Committing"
+      }
+    case .composing:
+      let text = statusMessage.lowercased()
+      if text.contains("chatgpt") { return "ChatGPT writing" }
+      if text.contains("rephras") { return "Rephrasing" }
+      if text.contains("insert") { return "Inserting" }
+      return "Working"
+    case .idle, .error:
+      return "Casper"
+    }
+  }
+
+  private func hudSpeechText() -> String {
+    if phase == .error || phase == .composing {
+      return ""
     }
     return pendingPartial
   }
@@ -502,10 +535,22 @@ final class DictationSession: ObservableObject {
       return
     }
     phase = .idle
-    statusMessage = didPasteInThisHold
-      ? "Pasted into \(activeAppName). Hold again to continue."
-      : "Done. Hold again to continue."
-    syncFloatingHUD()
+    if didPasteInThisHold {
+      statusMessage = "Pasted into \(activeAppName). Hold again to continue."
+      syncFloatingHUD()
+      return
+    }
+    let spoken = fullTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+    if spoken.isEmpty {
+      statusMessage = "No speech captured — hold and speak, then release."
+      FloatingHUDController.shared.flashNotice(
+        title: "No speech captured",
+        subtitle: "Hold the shortcut and speak, then release."
+      )
+    } else {
+      statusMessage = "Done. Hold again to continue."
+      syncFloatingHUD()
+    }
   }
 
   private func completePasteJob() {
@@ -544,6 +589,8 @@ final class DictationSession: ObservableObject {
     apiKeyLock.lock()
     apiKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
     apiKeyLock.unlock()
+    discardWarmHear()
+    warmPreconnect()
   }
 
   private var currentApiKey: String {
@@ -584,6 +631,7 @@ final class DictationSession: ObservableObject {
         phase = .error
         lastError = "Add an OpenAI key in API Keys to ask ChatGPT."
         statusMessage = lastError ?? ""
+        syncFloatingHUD()
         return
       }
     }
@@ -716,29 +764,20 @@ final class DictationSession: ObservableObject {
   }
 
   private func startPipeline(apiKey: String) async throws {
-    let client = HearClient(
-      apiKey: apiKey,
-      config: captureKind == .notes ? .notes : HearConfig()
-    )
+    let client: HearClient
+    if let warm = claimWarmHear() {
+      client = warm
+    } else {
+      client = HearClient(
+        apiKey: apiKey,
+        config: captureKind == .notes ? .notes : HearConfig()
+      )
+      client.connect()
+    }
     hear = client
-
-    client.onConnected = { [weak self] in
-      Task { @MainActor in
-        self?.onHearConnected()
-      }
-    }
-    client.onEvent = { [weak self] event in
-      Task { @MainActor in
-        self?.handleHearEvent(event)
-      }
-    }
-    client.onDisconnected = { [weak self] in
-      Task { @MainActor in
-        guard let self else { return }
-        guard self.isHolding, self.phase == .listening || self.phase == .connecting else { return }
-        AppLog.error("Hear disconnected while holding")
-        self.fail("Hear disconnected. Check your network and try again.")
-      }
+    bindHearCallbacks(client)
+    if client.isConnected {
+      onHearConnected()
     }
 
     lastNoteMic = []
@@ -788,7 +827,58 @@ final class DictationSession: ObservableObject {
       }
       try engine.start()
     }
+  }
+
+  private func bindHearCallbacks(_ client: HearClient) {
+    client.onConnected = { [weak self] in
+      Task { @MainActor in
+        self?.onHearConnected()
+      }
+    }
+    client.onEvent = { [weak self] event in
+      Task { @MainActor in
+        self?.handleHearEvent(event)
+      }
+    }
+    client.onDisconnected = { [weak self] in
+      Task { @MainActor in
+        guard let self else { return }
+        guard self.isHolding, self.phase == .listening || self.phase == .connecting else { return }
+        AppLog.error("Hear disconnected while holding")
+        self.fail("Hear disconnected. Check your network and try again.")
+      }
+    }
+  }
+
+  /// Open a dictate/ask socket while idle so the next hold is already handshake-complete.
+  private func warmPreconnect() {
+    guard isEngineEnabled, hear == nil, warmHear == nil else { return }
+    let key = currentApiKey
+    guard !key.isEmpty else { return }
+    let client = HearClient(apiKey: key, config: HearConfig())
+    client.onDisconnected = { [weak self] in
+      Task { @MainActor in
+        guard let self, self.warmHear === client else { return }
+        self.warmHear = nil
+      }
+    }
+    warmHear = client
     client.connect()
+  }
+
+  private func claimWarmHear() -> HearClient? {
+    guard captureKind != .notes else { return nil }
+    guard let client = warmHear, client.isUsable else {
+      discardWarmHear()
+      return nil
+    }
+    warmHear = nil
+    return client
+  }
+
+  private func discardWarmHear() {
+    warmHear?.disconnect()
+    warmHear = nil
   }
 
   private func ingestNoteMic(_ samples: [Int16]) {
@@ -832,6 +922,7 @@ final class DictationSession: ObservableObject {
 
   private func onHearConnected() {
     guard isHolding else { return }
+    guard !hearSocketReady else { return }
     hearSocketReady = true
     phase = .listening
     statusMessage = listeningStatus(for: captureKind)
@@ -988,7 +1079,10 @@ final class DictationSession: ObservableObject {
     guard !prompt.isEmpty else {
       phase = .idle
       statusMessage = "No speech captured — hold Option+Command and speak a request"
-      syncFloatingHUD()
+      FloatingHUDController.shared.flashNotice(
+        title: "No speech captured",
+        subtitle: "Hold the Ask shortcut and speak a request."
+      )
       return
     }
 
@@ -1039,10 +1133,20 @@ final class DictationSession: ObservableObject {
       statusMessage = "Pasted into \(activeAppName)"
       FloatingHUDController.shared.flashPasted(into: activeAppName)
       HistoryStore.shared.add(text: text, kind: kind, appName: activeAppName)
-    } else if !GlobalHoldHotKey.isProcessTrusted {
-      statusMessage = "Paste failed — enable ~/Applications/CasperFlow.app in Accessibility"
     } else {
-      statusMessage = "Paste failed — click the other app’s text field, then dictate again"
+      let message: String
+      if !GlobalHoldHotKey.isProcessTrusted {
+        message = "Paste failed — enable ~/Applications/Casper.app in Accessibility"
+      } else {
+        message = "Paste failed — click the other app’s text field, then dictate again"
+      }
+      statusMessage = message
+      lastError = message
+      FloatingHUDController.shared.flashNotice(
+        title: message,
+        subtitle: activeAppName,
+        isError: true
+      )
     }
   }
 
@@ -1082,6 +1186,7 @@ final class DictationSession: ObservableObject {
     hear = nil
     hearSocketReady = false
     preRoll.reset()
+    warmPreconnect()
   }
 
   private func requestMicPermission() async -> Bool {

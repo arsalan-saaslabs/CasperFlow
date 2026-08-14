@@ -287,7 +287,7 @@ struct PermissionsSectionView: View {
             session.refreshHotKeyAccess()
           }
         }
-        Button("Reveal CasperFlow.app") {
+        Button("Reveal Casper.app") {
           GlobalHoldHotKey.revealAppInFinder()
         }
         Button("I enabled it — recheck") {
@@ -296,7 +296,7 @@ struct PermissionsSectionView: View {
       } header: {
         Text("Accessibility")
       } footer: {
-        Text("Enable the CasperFlow in ~/Applications (not Cursor, not the Desktop/dist copy). Use Reveal CasperFlow.app then Accessibility → +. Required for Ctrl+Option dictate, Option+Command Ask ChatGPT, rephrase, and paste.")
+        Text("Enable Casper in ~/Applications (not Cursor, not the Desktop/dist copy). Use Reveal Casper.app then Accessibility → +. Required for Ctrl+Option dictate, Option+Command Ask ChatGPT, rephrase, and paste.")
       }
 
       Section {

@@ -12,13 +12,13 @@ private final class DictationHUDPanel: NSPanel {
 final class FloatingHUDController {
   static let shared = FloatingHUDController()
 
-  private static let hudSize = NSSize(width: 440, height: 128)
+  private static let hudSize = NSSize(width: 440, height: 148)
   private static let bottomMargin: CGFloat = 48
 
   private var panel: DictationHUDPanel?
   private var model: HUDModel?
-  private var pasteHideTask: Task<Void, Never>?
-  private var isShowingPasteFlash = false
+  private var dismissTask: Task<Void, Never>?
+  private var isHoldingNotice = false
 
   func attach(session: DictationSession) {
     _ = session
@@ -26,48 +26,95 @@ final class FloatingHUDController {
 
   func sync(
     phase: DictationSession.Phase,
+    activity: String,
     pending: String,
     committed: String,
     mode: String,
     level: Float = 0
   ) {
-    if isShowingPasteFlash {
+    if isHoldingNotice, phase == .idle {
       return
     }
-    pasteHideTask?.cancel()
+    dismissTask?.cancel()
     switch phase {
     case .connecting, .listening, .finalizing, .composing:
+      isHoldingNotice = false
       show(
+        activity: activity,
         pending: pending,
         committed: committed,
         mode: mode,
         phase: phase,
         pastedInto: nil
       )
-    case .idle, .error:
+    case .error:
+      isHoldingNotice = true
+      show(
+        activity: activity,
+        pending: pending,
+        committed: committed,
+        mode: mode,
+        phase: .error,
+        pastedInto: nil
+      )
+      scheduleDismiss(afterNanoseconds: 4_500_000_000)
+    case .idle:
       hide()
     }
   }
 
   func flashPasted(into appName: String) {
-    pasteHideTask?.cancel()
-    isShowingPasteFlash = true
-    show(
-      pending: "",
-      committed: "Inserted into \(appName)",
-      mode: appName,
+    flashNotice(
+      title: "Inserted into \(appName)",
+      subtitle: appName,
       phase: .idle,
-      pastedInto: appName
+      isPaste: true
     )
-    pasteHideTask = Task { @MainActor in
-      try? await Task.sleep(nanoseconds: 1_200_000_000)
+  }
+
+  func flashNotice(title: String, subtitle: String = "", isError: Bool = false) {
+    flashNotice(
+      title: title,
+      subtitle: subtitle,
+      phase: isError ? .error : .idle,
+      isPaste: false
+    )
+  }
+
+  private func flashNotice(
+    title: String,
+    subtitle: String,
+    phase: DictationSession.Phase,
+    isPaste: Bool
+  ) {
+    dismissTask?.cancel()
+    isHoldingNotice = true
+    show(
+      activity: isPaste ? "Pasted" : (phase == .error ? "Error" : title),
+      pending: "",
+      committed: title,
+      mode: subtitle,
+      phase: phase,
+      pastedInto: isPaste ? subtitle : nil
+    )
+    scheduleDismiss(afterNanoseconds: isErrorDuration(phase))
+  }
+
+  private func isErrorDuration(_ phase: DictationSession.Phase) -> UInt64 {
+    phase == .error ? 4_500_000_000 : 2_000_000_000
+  }
+
+  private func scheduleDismiss(afterNanoseconds nanos: UInt64) {
+    dismissTask = Task { @MainActor in
+      try? await Task.sleep(nanoseconds: nanos)
       guard !Task.isCancelled else { return }
-      self.isShowingPasteFlash = false
+      self.isHoldingNotice = false
       self.hide()
     }
   }
 
   private func show(
+    activity: String,
     pending: String,
     committed: String,
     mode: String,
@@ -76,6 +123,7 @@ final class FloatingHUDController {
   ) {
     let model = ensurePanel()
     model.phase = phase
+    model.activity = activity
     model.mode = mode
     model.committed = committed
     model.pending = pending
@@ -146,6 +194,7 @@ final class FloatingHUDController {
 @MainActor
 final class HUDModel: ObservableObject {
   @Published var phase: DictationSession.Phase = .idle
+  @Published var activity = ""
   @Published var mode = ""
   @Published var committed = ""
   @Published var pending = ""
@@ -161,12 +210,21 @@ struct FloatingHUDView: View {
         if model.pastedInto != nil {
           Image(systemName: "checkmark.circle.fill")
             .foregroundStyle(.green)
-        } else if model.phase == .composing {
+        } else if model.phase == .error {
+          Image(systemName: "exclamationmark.triangle.fill")
+            .foregroundStyle(.orange)
+        } else if model.phase == .composing
+          || model.phase == .finalizing
+          || model.phase == .connecting {
           ProgressView()
             .controlSize(.small)
+        } else if model.phase == .listening {
+          Image(systemName: "waveform")
+            .foregroundStyle(WFTheme.accent)
         }
         Text(phaseLabel)
           .font(.caption.weight(.semibold))
+          .lineLimit(1)
         Spacer()
         Text(model.mode)
           .font(.caption2)
@@ -183,9 +241,9 @@ struct FloatingHUDView: View {
       if !model.pending.isEmpty {
         Text(model.pending)
           .font(.callout)
-          .italic()
-          .foregroundStyle(.secondary)
-          .lineLimit(3)
+          .italic(model.phase != .error)
+          .foregroundStyle(model.phase == .error ? .primary : .secondary)
+          .lineLimit(4)
       }
       if model.committed.isEmpty && model.pending.isEmpty && model.pastedInto == nil {
         Text(emptyLabel)
@@ -206,20 +264,24 @@ struct FloatingHUDView: View {
 
   private var emptyLabel: String {
     switch model.phase {
-    case .composing: return "ChatGPT is writing…"
-    case .connecting: return "Listening…"
-    case .listening, .finalizing, .idle, .error: return "Listening…"
+    case .listening, .connecting: return "Speak…"
+    case .finalizing: return "Finishing…"
+    case .composing: return model.activity.isEmpty ? "Working…" : "\(model.activity)…"
+    case .error: return "Something went wrong"
+    case .idle: return "Speak…"
     }
   }
 
   private var phaseLabel: String {
     if model.pastedInto != nil { return "Pasted" }
+    if !model.activity.isEmpty { return model.activity }
     switch model.phase {
-    case .connecting: return "Listening"
+    case .connecting: return "Starting"
     case .listening: return "Listening"
-    case .finalizing: return "Finishing"
+    case .finalizing: return "Committing"
     case .composing: return "Working"
-    case .idle, .error: return "Casper"
+    case .error: return "Error"
+    case .idle: return "Casper"
     }
   }
 }

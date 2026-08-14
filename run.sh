@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Launch the packaged .app via `open` so TCC/Accessibility binds to CasperFlow.app
+# Launch the packaged .app via `open` so TCC/Accessibility binds to Casper.app
 # (not the parent terminal / Cursor).
 set -euo pipefail
 
 PKG="$(cd "$(dirname "$0")" && pwd)"
-DIST_APP="$PKG/dist/CasperFlow.app"
-APP="${HOME}/Applications/CasperFlow.app"
+DIST_APP="$PKG/dist/Casper.app"
+APP="${HOME}/Applications/Casper.app"
 
 # Optional .env next to this script (never required — keys can be set in the app).
 load_optional_env() {
@@ -57,4 +57,4 @@ echo "Launched $APP"
 if [[ -z "${PYAI_API_KEY:-}" ]]; then
   echo "No PYAI_API_KEY in the environment — set it in CasperFlow → API Keys if you have not already."
 fi
-echo "In Accessibility, enable CasperFlow from ~/Applications (bundle com.casperflow.app) — not Cursor, not the Desktop/dist copy."
+echo "In Accessibility, enable Casper from ~/Applications (bundle com.casperflow.app) — not Cursor, not the Desktop/dist copy."

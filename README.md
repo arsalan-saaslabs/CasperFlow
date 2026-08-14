@@ -36,7 +36,7 @@ No clone, no `./run.sh`.
 ./create-dmg.sh
 ```
 
-Output: `dist/CasperFlow-0.2.2.dmg`
+Output: `dist/CasperFlow-0.2.3.dmg`
 
 ## Run from source
 
@@ -46,9 +46,9 @@ Output: `dist/CasperFlow-0.2.2.dmg`
 
 Then open **API Keys** in the app and save your PyAI key (OpenAI is optional). A `.env` file is **not required**.
 
-This builds the app, installs `~/Applications/CasperFlow.app`, and launches that copy (required for Accessibility / global hotkey).
+This builds the app, installs `~/Applications/Casper.app`, and launches that copy (required for Accessibility / global hotkey).
 
-Always use `./run.sh` or `./build-app.sh` — not `swift run`. Enable **only** the CasperFlow in **~/Applications** (bundle `com.casperflow.app`), not Cursor and not `dist/CasperFlow.app` on the Desktop. Rebuilds keep the same bundle id, so that Accessibility toggle should stay valid.
+Always use `./run.sh` or `./build-app.sh` — not `swift run`. Enable **only Casper** in **~/Applications** (bundle `com.casperflow.app`), not Cursor and not `dist/Casper.app`. Rebuilds keep the same bundle id, so that Accessibility toggle should stay valid.
 
 ## App sections
 
@@ -74,7 +74,7 @@ Defaults (change any of these in **Shortcuts**):
 | **Ctrl+Shift+H** (tap) | Show / hide history overlay |
 | Space / on-screen button | Dictate while CasperFlow is focused |
 
-Enable **~/Applications/CasperFlow.app** (`com.casperflow.app`) under System Settings → Privacy & Security → Accessibility — not Cursor, not the Desktop `dist` copy.
+Enable **~/Applications/Casper.app** (`com.casperflow.app`) under System Settings → Privacy & Security → Accessibility — not Cursor, not the Desktop `dist` copy.
 
 A **menu bar icon** (waveform) stays in the top-right of the screen. From there you can enable/disable hotkeys, open the window, or quit.
 

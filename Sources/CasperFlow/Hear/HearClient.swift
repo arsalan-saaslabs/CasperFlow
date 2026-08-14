@@ -48,6 +48,19 @@ final class HearClient: NSObject, URLSessionWebSocketDelegate, @unchecked Sendab
   private let stateLock = NSLock()
   private var isOpen = false
 
+  var isConnected: Bool {
+    stateLock.lock()
+    defer { stateLock.unlock() }
+    return isOpen
+  }
+
+  /// Handshake in flight or already open (safe to claim as a warm socket).
+  var isUsable: Bool {
+    stateLock.lock()
+    defer { stateLock.unlock() }
+    return isOpen || task != nil
+  }
+
   init(apiKey: String, config: HearConfig = HearConfig()) {
     self.apiKey = apiKey
     self.config = config
