@@ -6,7 +6,7 @@ PKG="$(cd "$(dirname "$0")" && pwd)"
 APP="$PKG/dist/Casper.app"
 STAGE="$PKG/dist/dmg-stage"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PKG/Resources/Info.plist")"
-DMG="$PKG/dist/CasperFlow-${VERSION}.dmg"
+DMG="$PKG/dist/Casper-${VERSION}.dmg"
 VOLUME_NAME="Casper"
 
 "$PKG/build-app.sh"
@@ -33,7 +33,7 @@ Casper — install
 You do not need to clone the repo or run any scripts.
 EOF
 
-rm -f "$DMG" "$PKG/dist/CasperFlow.dmg"
+rm -f "$DMG" "$PKG/dist/Casper.dmg" "$PKG/dist/CasperFlow.dmg"
 hdiutil create \
   -volname "$VOLUME_NAME" \
   -srcfolder "$STAGE" \
@@ -41,7 +41,7 @@ hdiutil create \
   -format UDZO \
   "$DMG"
 
-ln -sf "$(basename "$DMG")" "$PKG/dist/CasperFlow.dmg"
+ln -sf "$(basename "$DMG")" "$PKG/dist/Casper.dmg"
 rm -rf "$STAGE"
 
 echo

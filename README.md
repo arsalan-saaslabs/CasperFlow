@@ -20,7 +20,7 @@ Mic → 16 kHz PCM16 → pre-roll → Hear stream
 
 ## Install (recommended)
 
-Download the latest `CasperFlow-*.dmg` from [Releases](https://github.com/arsalan-saaslabs/CasperFlow/releases).
+Download the latest `Casper-*.dmg` from [Releases](https://github.com/arsalan-saaslabs/CasperFlow/releases).
 
 1. Open the DMG and drag **CasperFlow** into **Applications**
 2. Launch it from Applications (not from the disk image)
@@ -36,7 +36,7 @@ No clone, no `./run.sh`.
 ./create-dmg.sh
 ```
 
-Output: `dist/CasperFlow-0.2.3.dmg`
+Output: `dist/Casper-0.2.4.dmg`
 
 ## Run from source
 

@@ -264,7 +264,8 @@ struct FloatingHUDView: View {
 
   private var emptyLabel: String {
     switch model.phase {
-    case .listening, .connecting: return "Speak…"
+    case .connecting: return "Connecting to PyAI…"
+    case .listening: return "Speak…"
     case .finalizing: return "Finishing…"
     case .composing: return model.activity.isEmpty ? "Working…" : "\(model.activity)…"
     case .error: return "Something went wrong"
@@ -276,7 +277,7 @@ struct FloatingHUDView: View {
     if model.pastedInto != nil { return "Pasted" }
     if !model.activity.isEmpty { return model.activity }
     switch model.phase {
-    case .connecting: return "Starting"
+    case .connecting: return "Connecting to PyAI"
     case .listening: return "Listening"
     case .finalizing: return "Committing"
     case .composing: return "Working"

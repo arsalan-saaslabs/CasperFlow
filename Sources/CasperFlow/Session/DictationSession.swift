@@ -54,6 +54,12 @@ final class DictationSession: ObservableObject {
   private var warmHear: HearClient?
   /// True after Hear WebSocket opens. Audio is pre-rolled until then.
   private var hearSocketReady = false
+  /// Last idle Hear handshake succeeded. False → next hold shows PyAI down immediately.
+  private var hearServiceAvailable = true
+  private var warmHearDidConnect = false
+  private var hearConnectTimeoutTask: Task<Void, Never>?
+  private static let hearConnectTimeoutNanoseconds: UInt64 = 1_000_000_000
+  private static let pyaiDownMessage = "PyAI Hear is down or unreachable."
   private let preRoll = PreRollBuffer(capacitySamples: AudioConstants.preRollSampleCount)
   private var isHolding = false
   private var didFlushPreRoll = false
@@ -491,10 +497,10 @@ final class DictationSession: ObservableObject {
     }
     switch phase {
     case .connecting:
-      return "Starting"
+      return "Connecting to PyAI"
     case .listening:
       if !hearSocketReady {
-        return "Starting"
+        return "Connecting to PyAI"
       }
       switch captureKind {
       case .ask: return "Ask ChatGPT"
@@ -637,6 +643,10 @@ final class DictationSession: ObservableObject {
     }
 
     captureKind = kind
+    if !hearServiceAvailable {
+      fail(Self.pyaiDownMessage)
+      return
+    }
     CommandOverlayController.shared.hide()
     HistoryOverlayController.shared.hide()
     isNoteTaking = kind == .notes
@@ -652,10 +662,11 @@ final class DictationSession: ObservableObject {
     lastError = nil
     refreshFrontmostApp()
     hearSocketReady = false
-    phase = .listening
-    statusMessage = listeningStatus(for: kind)
+    phase = .connecting
+    statusMessage = "Connecting to PyAI"
     AppLog.info("beginHold kind=\(kind.rawValue) source=\(noteAudioSource.rawValue)")
     syncFloatingHUD()
+    scheduleHearConnectTimeout()
 
     Task {
       if kind == .notes, noteAudioSource.usesSystemAudio, !noteAudioSource.usesMicrophone {
@@ -699,6 +710,11 @@ final class DictationSession: ObservableObject {
 
   func endHold() {
     guard isHolding else { return }
+    cancelHearConnectTimeout()
+    if !hearSocketReady {
+      fail(Self.pyaiDownMessage)
+      return
+    }
     isHolding = false
     overlayCaptureActive = false
     let kind = captureKind
@@ -845,7 +861,8 @@ final class DictationSession: ObservableObject {
         guard let self else { return }
         guard self.isHolding, self.phase == .listening || self.phase == .connecting else { return }
         AppLog.error("Hear disconnected while holding")
-        self.fail("Hear disconnected. Check your network and try again.")
+        self.markHearUnavailable()
+        self.fail(Self.pyaiDownMessage)
       }
     }
   }
@@ -856,9 +873,20 @@ final class DictationSession: ObservableObject {
     let key = currentApiKey
     guard !key.isEmpty else { return }
     let client = HearClient(apiKey: key, config: HearConfig())
+    warmHearDidConnect = false
+    client.onConnected = { [weak self] in
+      Task { @MainActor in
+        guard let self, self.warmHear === client else { return }
+        self.warmHearDidConnect = true
+        self.hearServiceAvailable = true
+      }
+    }
     client.onDisconnected = { [weak self] in
       Task { @MainActor in
         guard let self, self.warmHear === client else { return }
+        if !self.warmHearDidConnect {
+          self.hearServiceAvailable = false
+        }
         self.warmHear = nil
       }
     }
@@ -923,6 +951,8 @@ final class DictationSession: ObservableObject {
   private func onHearConnected() {
     guard isHolding else { return }
     guard !hearSocketReady else { return }
+    cancelHearConnectTimeout()
+    hearServiceAvailable = true
     hearSocketReady = true
     phase = .listening
     statusMessage = listeningStatus(for: captureKind)
@@ -988,7 +1018,7 @@ final class DictationSession: ObservableObject {
       if Self.isBenignSocketError(message) {
         AppLog.info("Ignored Hear socket error: \(message)")
         if phase == .listening || phase == .connecting {
-          fail("Hear connection dropped. Tap Restart — you do not need to quit the app.")
+          fail(Self.pyaiDownMessage)
         }
         return
       }
@@ -1160,6 +1190,10 @@ final class DictationSession: ObservableObject {
   }
 
   private func fail(_ message: String) {
+    cancelHearConnectTimeout()
+    if message == Self.pyaiDownMessage {
+      markHearUnavailable()
+    }
     AppLog.error(message)
     lastError = message
     statusMessage = message
@@ -1179,6 +1213,25 @@ final class DictationSession: ObservableObject {
     tearDownHear()
     level = 0
     syncFloatingHUD()
+  }
+
+  private func scheduleHearConnectTimeout() {
+    cancelHearConnectTimeout()
+    hearConnectTimeoutTask = Task { @MainActor in
+      try? await Task.sleep(nanoseconds: Self.hearConnectTimeoutNanoseconds)
+      guard !Task.isCancelled else { return }
+      guard self.isHolding, !self.hearSocketReady else { return }
+      self.fail(Self.pyaiDownMessage)
+    }
+  }
+
+  private func cancelHearConnectTimeout() {
+    hearConnectTimeoutTask?.cancel()
+    hearConnectTimeoutTask = nil
+  }
+
+  private func markHearUnavailable() {
+    hearServiceAvailable = false
   }
 
   private func tearDownHear() {
