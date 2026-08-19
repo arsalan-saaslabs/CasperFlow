@@ -1,8 +1,20 @@
 # Casper Setup Guide
 
-This guide covers installing Casper from source on a clean Mac, configuring its API keys and permissions, validating the installation, and rebuilding or packaging the app during development.
+This guide installs Casper from the GitHub repo and checks that it works.
 
-For product workflows, features, screenshots, privacy, and architecture, see the [main README](README.md).
+You are finished when you can **hold Control + Option, speak a sentence, and see that sentence appear in TextEdit**. That one test proves the app is built, the PyAI key is saved, and macOS permissions are correct.
+
+Start after Git and Swift are already installed. The first `./run.sh` can take 1–3 minutes to compile; later launches are seconds.
+
+| Step | You do |
+|---|---|
+| 1 | Clone the repo |
+| 2 | Run `./run.sh` and wait for Casper to open |
+| 3 | Allow Casper in System Settings (it is not notarized) |
+| 4 | Save the PyAI key in **API Keys** |
+| 5 | Enable Accessibility, then dictate into TextEdit |
+
+Product features, screenshots, privacy, and architecture live in the [README](README.md).
 
 ## Contents
 
@@ -22,31 +34,12 @@ For product workflows, features, screenshots, privacy, and architecture, see the
 
 - macOS 14 Sonoma or later
 - Git
-- Xcode 15+ or Apple command-line tools with Swift 5.9+
-- Internet access to PyAI and, for optional features, OpenAI
+- Xcode 15+ **or** Apple command-line tools with Swift 5.9+
+- Network access to `api.pyai.com` (HTTPS and WSS)
 
-Casper is a native Swift Package Manager project. It has no third-party Swift package dependencies, database, migration, seed, Docker container, or separately managed service.
+Casper is a native Swift Package Manager app. There is no Docker, database, seed, or extra service to start.
 
-### API keys
-
-| Key | Required for |
-|---|---|
-| PyAI key with `hear:stream` access | Dictate, Ask ChatGPT voice capture, and Note taker transcription |
-| OpenAI key | Ask ChatGPT, explicit Rephrase, LLM tone rewriting, and note summaries/action items |
-
-Dictate can use local vocabulary and tone rules without an OpenAI key.
-
-## Clean installation
-
-### 1. Install Apple's development tools
-
-If `swift` is unavailable, install the command-line tools:
-
-```bash
-xcode-select --install
-```
-
-Finish the macOS installer, then verify the active tools:
+Check tools:
 
 ```bash
 xcode-select -p
@@ -54,60 +47,114 @@ swift --version
 git --version
 ```
 
-`swift --version` must report Swift 5.9 or newer. If you use the full Xcode application, select the correct toolchain from **Xcode → Settings → Locations → Command Line Tools**.
+`swift --version` must show **5.9 or newer**. If `swift` is missing:
 
-### 2. Clone CasperFlow
+```bash
+xcode-select --install
+```
+
+Finish the macOS installer, then re-run the checks. If full Xcode is installed, set the toolchain in **Xcode → Settings → Locations → Command Line Tools**.
+
+### API keys
+
+| Key | Required for first run? | Used for |
+|---|---|---|
+| PyAI key with `hear:stream` access | **Yes** | Dictate, Ask ChatGPT voice capture, and Note taker transcription |
+| OpenAI key | No | Ask ChatGPT, Rephrase, LLM tone rewriting, and note summaries |
+
+Have the PyAI key ready before you start. OpenAI can wait. Dictate still works with local vocabulary and tone rules if no OpenAI key is set.
+
+## Clean installation
+
+### 1. Clone CasperFlow
 
 ```bash
 git clone https://github.com/arsalan-saaslabs/CasperFlow.git
 cd CasperFlow
 ```
 
-### 3. Build, install, and launch Casper
+Stay in this folder for every later command.
+
+### 2. Build, install, and launch Casper
 
 ```bash
 ./run.sh
 ```
 
-The supported source workflow launches a packaged application instead of a bare Swift executable. When a build is needed, `run.sh` calls `build-app.sh`, which:
+The first run can take 1–3 minutes. What this does:
 
-1. runs `swift build -c release`;
-2. creates `dist/Casper.app`;
-3. ad-hoc signs it with bundle identifier `com.casperflow.app`;
-4. replaces `~/Applications/Casper.app`;
-5. removes the legacy `~/Applications/CasperFlow.app` path.
+1. Builds a release binary if the app is missing or Swift sources changed.
+2. Packages `dist/Casper.app` and ad-hoc signs it as `com.casperflow.app`.
+3. Installs it to `~/Applications/Casper.app` (and removes any old `~/Applications/CasperFlow.app`).
+4. Stops a previous `CasperFlow` process.
+5. Opens the **installed** app, not the copy in `dist/`.
 
-After the conditional build, `run.sh` stops an older `CasperFlow` process and launches the installed source build.
+What you should see:
 
-Do not use `swift run` for normal interactive testing. Accessibility approval and global shortcuts must attach to the stable packaged app identity.
+- Terminal: `Launched /Users/<you>/Applications/Casper.app`
+- Casper window or menu-bar ghost icon
+
+Do **not** use `swift run`. Accessibility and global shortcuts must attach to the packaged app identity.
+
+If Casper does not appear, look in **Finder → Go → Go to Folder… → `~/Applications`**. Open `Casper.app` from there.
+
+### 3. Allow Casper to open
+
+The source and DMG builds are ad-hoc signed, not Apple-notarized. macOS may block the first launch with “Apple cannot check it for malicious software.”
+
+Allow this one app (do not switch the Mac to allow apps from anywhere):
+
+1. Open **System Settings → Privacy & Security**.
+2. Scroll to the **Security** section at the bottom.
+3. Find the message that Casper was blocked because it is not from an identified developer.
+4. Select **Open Anyway**.
+5. Confirm with Touch ID or your Mac password, then select **Open**.
+
+If that banner is gone, in Finder go to `~/Applications`, **Control-click** `Casper.app`, choose **Open**, and confirm.
+
+### 4. Save the PyAI key
+
+Save the key **inside Casper**, not in Terminal:
+
+1. If the main window is hidden, click the Casper icon in the menu bar and choose **Open Casper**.
+2. In the left sidebar, select **API Keys**.
+3. Paste the PyAI key into the **PyAI** field (subtitle: “Required for Hear speech-to-text”). Leave **OpenAI** empty unless you already need Ask ChatGPT, Rephrase, or note insights.
+4. Select **Save keys**. You should see a short saved confirmation on that screen.
+
+That in-app **API Keys** page is the place the running app reads. Keys stay in local macOS `UserDefaults` on this Mac. They are not stored in Keychain and are not written to logs on purpose.
 
 ## Configure API keys
 
 ### Recommended: use Casper's settings
 
-1. Open Casper.
-2. Select **API Keys** in the sidebar.
-3. Enter the PyAI key.
-4. Enter an OpenAI key if OpenAI-backed features are needed.
-5. Select **Save keys**.
+Save the key in the app UI. That is the location Casper reads while it is running.
 
-Keys saved in the app remain in local macOS `UserDefaults`. They are not stored in Keychain and are not intentionally written to logs.
+1. If the main window is hidden, click the Casper icon in the menu bar and choose **Open Casper**.
+2. Left sidebar → **API Keys**.
+3. Paste into the **PyAI** field. Do not paste it into **OpenAI**.
+4. Select **Save keys** and wait for the saved confirmation.
+
+Leave **OpenAI** empty unless you already need Ask ChatGPT, Rephrase, or note insights.
+
+Do not put the key in Terminal, chat, or a committed file. Optional `.env` fallback is below and is only for local PyAI development.
 
 ### Optional: repository `.env` fallback
 
-For local PyAI development, create an ignored `.env` file:
+Keys in the app are preferred. For a file-based PyAI fallback:
 
 ```bash
 cp .env.example .env
 ```
 
-Set the PyAI value:
+Set only:
 
 ```dotenv
-PYAI_API_KEY=your_key_here
+PYAI_API_KEY=
 ```
 
-The current source loader does not read `OPENAI_API_KEY` from `.env`. Configure the OpenAI key inside Casper. Never commit `.env` or a real key.
+Put the real value in `.env` on your machine. Never commit `.env` or a live key.
+
+The app does **not** read `OPENAI_API_KEY` from `.env`. Save OpenAI inside Casper. In-app PyAI wins over environment and `.env`.
 
 ## Grant macOS permissions
 
@@ -115,61 +162,82 @@ Casper's **Permissions** section links to the relevant System Settings pages and
 
 ### Accessibility
 
-Accessibility is required for global shortcuts, reading a selection, and inserting or pasting text into another application.
+Accessibility is required for the shortcut and for inserting text into another app.
 
-Enable the exact app that is running:
+1. In Casper, open **Permissions**.
+2. Use the link to **System Settings → Privacy & Security → Accessibility**.
+3. Enable **Casper** from the exact app that is running:
+   - source build: `~/Applications/Casper.app`
+   - release/DMG installation: `/Applications/Casper.app`
+4. Come back to **Permissions** and recheck if the status is still untrusted.
 
-- source build: `~/Applications/Casper.app`
-- release/DMG installation: `/Applications/Casper.app`
-
-Do not enable Terminal, Cursor, the `dist/Casper.app` build artifact, or an app still mounted inside a DMG when you intend to run the installed copy.
+Do **not** enable Terminal, Cursor, `dist/Casper.app`, or a copy still sitting in a mounted DMG.
 
 If Casper remains untrusted after a rebuild:
 
 1. Open **System Settings → Privacy & Security → Accessibility**.
 2. Remove the stale Casper entry.
 3. Add the exact installed `Casper.app` again.
-4. Return to Casper's **Permissions** section and select the recheck action.
+4. Return to **Permissions** and recheck.
 
 ### Microphone
 
-Microphone permission is required for Dictate, voice-based Ask ChatGPT, microphone notes, and Mic + system notes. macOS requests access the first time Casper starts one of these captures.
+Microphone is required for Dictate, voice-based Ask ChatGPT, microphone notes, and Mic + system notes. macOS asks the first time Casper starts one of these captures. Allow it.
 
 ### Screen Recording
 
-Screen Recording permission is required only for **System audio** or **Mic + system** notes.
+Screen Recording is required only for **System audio** or **Mic + system** notes. Casper discards video frames; the permission is how macOS exposes playback audio.
 
 1. Open **Note taker**.
-2. Select **System audio** or **Mic + system**.
-3. Start Note taker once to trigger the macOS prompt.
-4. Grant Screen Recording access.
-5. Restart Casper if macOS requests it, then retry the capture.
-
-Casper discards screen video frames and does not save a screen recording. The permission is used to obtain system playback audio through ScreenCaptureKit.
+2. Choose **System audio** or **Mic + system**.
+3. Start once to trigger the prompt.
+4. Grant Screen Recording.
+5. Restart Casper if macOS asks, then retry.
 
 ## Verify the installation
 
 ### Dictate smoke test
 
-1. Open TextEdit and click inside a writable document.
+1. Open **TextEdit**, create a document, click in the body.
 2. Hold **Control + Option**.
-3. Speak a short sentence.
-4. Release the shortcut.
-5. Confirm the floating HUD appeared and text was inserted into TextEdit.
-6. Open Casper's **History** section and confirm the Dictate entry exists.
+3. Speak one short sentence.
+4. Release.
+5. Confirm the floating HUD appeared and the sentence landed in TextEdit.
+6. Open Casper **History** and confirm a Dictate entry exists.
+
+Default shortcuts (change them later in settings if you want):
+
+| Action | Shortcut |
+|---|---|
+| Dictate | Control + Option |
+| Ask ChatGPT | Option + Command |
+| Rephrase selection | Control + Command |
+
+Setup succeeded when all of these are true:
+
+- Casper is running from `~/Applications/Casper.app`
+- PyAI key is saved
+- Accessibility is on for that exact app
+- Holding **Control + Option** pastes into TextEdit
+- History shows the Dictate entry
+
+Stop here unless you need OpenAI, system-audio notes, or packaging.
 
 ### Optional OpenAI smoke tests
 
-- Hold **Option + Command**, ask for a short sentence, and confirm the result is pasted.
-- Select a short paragraph, press **Control + Command**, and confirm the rewritten selection replaces it.
+In **API Keys**, save an OpenAI key, then:
+
+- Hold **Option + Command**, ask for a short sentence, and confirm it pastes.
+- Select a short paragraph, press **Control + Command**, and confirm it is replaced.
+
+Ask / Rephrase input is capped at 2,000 characters. Note insights are capped at 24,000 characters.
 
 ### Note taker smoke test
 
-1. Open **Note taker**.
-2. Choose **Microphone**.
-3. Start capture, speak briefly, then stop.
-4. Confirm a local note is created.
-5. If an OpenAI key is configured, generate note insights.
+1. Open **Note taker** → **Microphone**.
+2. Start, speak briefly, stop.
+3. Confirm a local note appears.
+4. Generate insights only if an OpenAI key is saved.
 
 ## Development commands
 
@@ -183,7 +251,7 @@ swift build
 swift build -c release
 ```
 
-These commands compile the executable but do not create or launch the stable app bundle required for complete Accessibility testing.
+These commands compile the executable but do not create or launch the app bundle required for Accessibility testing.
 
 ### Force a packaged rebuild
 
@@ -192,7 +260,7 @@ These commands compile the executable but do not create or launch the stable app
 ./run.sh
 ```
 
-Use this after changing `Package.swift`, build scripts, `Resources/Info.plist`, icons, or other resources. `run.sh` automatically detects newer Swift source files, but it does not use every non-source file to decide whether a rebuild is needed. Running it after `build-app.sh` stops any older process and launches the newly installed bundle.
+Use this after changing `Package.swift`, build scripts, `Resources/Info.plist`, icons, or other non-Swift resources. `run.sh` does not treat those files as “needs rebuild.”
 
 ### Build if needed and launch
 
@@ -200,7 +268,7 @@ Use this after changing `Package.swift`, build scripts, `Resources/Info.plist`, 
 ./run.sh
 ```
 
-This is the normal development command after Swift source changes.
+This is the normal command after Swift source changes. It rebuilds when sources are newer than the installed binary, then relaunches `~/Applications/Casper.app`.
 
 ### Validate repository files
 
@@ -210,7 +278,7 @@ plutil -lint Resources/Info.plist
 swift build -c release
 ```
 
-The package currently has no automated test target or configured linter. A successful build plus manual Dictate, paste, permission, and Note taker smoke tests are the current validation path.
+There is no test target or linter yet. A green build plus the Dictate smoke test is the current check.
 
 ## Build a DMG
 
@@ -218,12 +286,14 @@ The package currently has no automated test target or configured linter. A succe
 ./create-dmg.sh
 ```
 
-This command first runs `build-app.sh`, so it also replaces `~/Applications/Casper.app`. It then creates:
+This runs `build-app.sh` first, so it also replaces `~/Applications/Casper.app`. Output:
 
-- `dist/Casper-<version>.dmg`
-- `dist/Casper.dmg` as a convenience symlink
+- `dist/Casper-<version>.dmg` (version from `Resources/Info.plist`)
+- `dist/Casper.dmg` symlink
 
-The version comes from `Resources/Info.plist`. The generated app is ad-hoc signed and not notarized; downloaded copies may require right-clicking Casper and selecting **Open**. Public distribution without that step requires a Developer ID and Apple notarization outside the current scripts.
+The app is ad-hoc signed, not notarized. Downloaded copies may need **right-click → Open**. Developer ID + notarization is outside these scripts.
+
+End users drag Casper into `/Applications` and launch **that** copy, not the one inside the disk image.
 
 ## Local files and network access
 
@@ -231,24 +301,25 @@ The version comes from `Resources/Info.plist`. The generated app is ad-hoc signe
 
 | Data | Location |
 |---|---|
-| Source installation | `~/Applications/Casper.app` |
-| Repository build output | `.build/` and `dist/` |
+| Source install | `~/Applications/Casper.app` |
+| Release / DMG install | `/Applications/Casper.app` |
+| Build artifacts | `.build/` and `dist/` |
 | History | `~/Library/Application Support/CasperFlow/history.json` |
 | Notes | `~/Library/Application Support/CasperFlow/notes.json` |
 | Vocabulary | `~/Library/Application Support/CasperFlow/vocabulary.json` |
 | Diagnostics | `~/Library/Application Support/CasperFlow/casperflow.log` |
-| App preferences and saved API keys | macOS `UserDefaults` |
+| Preferences and saved API keys | macOS `UserDefaults` |
 
-History, notes, vocabulary, preferences, keys, and logs have no built-in cloud-sync step. Microphone and system audio are processed in memory rather than saved as media files.
+Nothing above is cloud-synced. Microphone and system audio stay in memory; they are not saved as media files.
 
 ### Outbound network access
 
-Allow normal TLS traffic on port 443 to:
+Allow TLS on port 443 to:
 
-- `api.pyai.com` over HTTPS and WSS for health checks and streaming transcription;
-- `api.openai.com` over HTTPS for configured OpenAI-backed text actions.
+- `api.pyai.com` — HTTPS and WSS for health checks and streaming transcription
+- `api.openai.com` — HTTPS, only when OpenAI features are configured
 
-Casper does not invoke a shell or synthesize Return. It inserts plain text into the focused UI element. Terminal applications are not currently blocked, so verify the active target before using a voice action at a terminal prompt.
+Casper inserts plain text at the caret. It does not press Return. Terminals are not blocked — check the focused app before dictating at a prompt.
 
 ## Troubleshooting
 
@@ -288,13 +359,19 @@ Casper does not invoke a shell or synthesize Return. It inserts plain text into 
 ### A code or resource change does not appear
 
 - For Swift source changes, rerun `./run.sh`.
-- For package, script, property-list, icon, or resource changes, run `./build-app.sh`, then `./run.sh` to stop any older process and launch the new build.
+- For package, script, property-list, icon, or resource changes, run `./build-app.sh`, then `./run.sh`.
 
 ### Gatekeeper blocks Casper
 
-For the current ad-hoc-signed source or DMG build, right-click `Casper.app`, select **Open**, and confirm the prompt. Launch the installed app rather than a copy inside the mounted disk image.
+The build is not notarized. Allow this one app:
+
+1. **System Settings → Privacy & Security** → scroll to **Security**.
+2. Select **Open Anyway** next to the Casper blocked message.
+3. Confirm with Touch ID or password, then **Open**.
+
+If the banner is gone: Finder → `~/Applications` → Control-click `Casper.app` → **Open**. Launch the installed app, not a copy inside a mounted DMG.
 
 ## Related documentation
 
-- [README](README.md): features, workflows, screenshots, architecture, privacy, and troubleshooting
-- [LICENSE](LICENSE): MIT license
+- [README](README.md) — features, workflows, screenshots, architecture, privacy
+- [LICENSE](LICENSE) — MIT
